@@ -41,6 +41,22 @@ Prefijo global: `/api`
 - `PATCH /leads/:id/stage`: mueve lead a otra etapa del mismo pipeline.
 - `PATCH /leads/:id/status`: cambia estado entre `open`, `won` y `lost`.
 
+## Notes
+
+- `POST /notes`: crea nota interna asociada a contacto o lead.
+- `GET /notes`: lista notas. Acepta `contactId` y `leadId`.
+- `GET /notes/:id`: obtiene nota.
+- `PATCH /notes/:id`: actualiza contenido de la nota.
+- `DELETE /notes/:id`: elimina nota.
+
+## Tasks
+
+- `POST /tasks`: crea tarea asociada a contacto o lead.
+- `GET /tasks`: lista tareas. Acepta `contactId`, `leadId`, `assignedUserId` y `status`.
+- `GET /tasks/:id`: obtiene tarea.
+- `PATCH /tasks/:id`: actualiza titulo, descripcion, vencimiento o asignacion.
+- `PATCH /tasks/:id/status`: cambia estado entre `open`, `done` y `canceled`.
+
 ## Futuro
 
 - `GET /conversations`

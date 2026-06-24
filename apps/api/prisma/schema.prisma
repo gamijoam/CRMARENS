@@ -36,6 +36,8 @@ model Organization {
   contacts Contact[]
   pipelines Pipeline[]
   leads Lead[]
+  notes Note[]
+  tasks Task[]
   conversations Conversation[]
   auditLogs AuditLog[]
 
@@ -54,6 +56,9 @@ model User {
   organizations OrganizationUser[]
   assignedConversations Conversation[] @relation("ConversationAssignee")
   assignedLeads Lead[] @relation("LeadAssignee")
+  assignedTasks Task[] @relation("TaskAssignee")
+  createdNotes Note[] @relation("NoteCreator")
+  createdTasks Task[] @relation("TaskCreator")
   sentMessages Message[] @relation("SentMessages")
 
   @@map("users")
@@ -86,6 +91,8 @@ model Contact {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   channels     ContactChannel[]
   leads        Lead[]
+  notes        Note[]
+  tasks        Task[]
   conversations Conversation[]
 
   @@index([organizationId])
@@ -152,9 +159,59 @@ model Lead {
   pipeline     Pipeline     @relation(fields: [pipelineId], references: [id], onDelete: Restrict)
   stage        PipelineStage @relation(fields: [stageId], references: [id], onDelete: Restrict)
   assignee     User?        @relation("LeadAssignee", fields: [assignedUserId], references: [id])
+  notes        Note[]
+  tasks        Task[]
 
   @@index([organizationId])
   @@map("leads")
+}
+
+model Note {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  contactId      String?  @map("contact_id")
+  leadId         String?  @map("lead_id")
+  body           String
+  createdByUserId String? @map("created_by_user_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contact      Contact?     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  lead         Lead?        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation("NoteCreator", fields: [createdByUserId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@index([contactId])
+  @@index([leadId])
+  @@map("notes")
+}
+
+model Task {
+  id             String    @id @default(cuid())
+  organizationId String    @map("organization_id")
+  contactId      String?   @map("contact_id")
+  leadId         String?   @map("lead_id")
+  title          String
+  description    String?
+  status         String    @default("open")
+  dueAt          DateTime? @map("due_at")
+  assignedUserId String?   @map("assigned_user_id")
+  createdByUserId String?  @map("created_by_user_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contact      Contact?     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  lead         Lead?        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  assignee     User?        @relation("TaskAssignee", fields: [assignedUserId], references: [id])
+  createdBy    User?        @relation("TaskCreator", fields: [createdByUserId], references: [id])
+
+  @@index([organizationId, status])
+  @@index([contactId])
+  @@index([leadId])
+  @@index([assignedUserId])
+  @@map("tasks")
 }
 
 model Conversation {

@@ -3,8 +3,10 @@ import { ConfigModule } from "@nestjs/config";
 import { AuthModule } from "./modules/auth/auth.module";
 import { ContactsModule } from "./modules/contacts/contacts.module";
 import { LeadsModule } from "./modules/leads/leads.module";
+import { NotesModule } from "./modules/notes/notes.module";
 import { OrganizationsModule } from "./modules/organizations/organizations.module";
 import { PipelinesModule } from "./modules/pipelines/pipelines.module";
+import { TasksModule } from "./modules/tasks/tasks.module";
 import { UsersModule } from "./modules/users/users.module";
 import { PrismaModule } from "./prisma/prisma.module";
 
@@ -17,7 +19,9 @@ import { PrismaModule } from "./prisma/prisma.module";
     UsersModule,
     ContactsModule,
     PipelinesModule,
-    LeadsModule
+    LeadsModule,
+    NotesModule,
+    TasksModule
   ]
 })
 export class AppModule {}
