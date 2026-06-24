@@ -349,6 +349,48 @@ textarea:focus {
   gap: 10px;
 }
 
+.import-tools {
+  display: grid;
+  gap: 12px;
+}
+
+.import-actions {
+  justify-content: flex-start;
+}
+
+.import-preview {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  max-height: 300px;
+  overflow: auto;
+}
+
+.import-row {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+.import-row.invalid {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.import-row span,
+.import-row small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.import-row.invalid small {
+  color: #c2410c;
+  font-weight: 800;
+}
+
 .filter-tabs {
   background: var(--surface-soft);
   border: 1px solid var(--border);

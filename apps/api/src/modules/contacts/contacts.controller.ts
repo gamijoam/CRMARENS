@@ -15,6 +15,7 @@ import { JwtAuthGuard } from "../../shared/jwt-auth.guard";
 import { requireOrganization } from "../../shared/require-organization";
 import { ContactsService } from "./contacts.service";
 import { CreateContactDto } from "./dto/create-contact.dto";
+import { ImportContactsDto } from "./dto/import-contacts.dto";
 import { ListContactsQueryDto } from "./dto/list-contacts-query.dto";
 import { UpdateContactDto } from "./dto/update-contact.dto";
 
@@ -31,6 +32,11 @@ export class ContactsController {
   @Get()
   findMany(@CurrentUser() user: AuthenticatedUser, @Query() query: ListContactsQueryDto) {
     return this.contactsService.findMany(requireOrganization(user), query);
+  }
+
+  @Post("import")
+  importMany(@CurrentUser() user: AuthenticatedUser, @Body() dto: ImportContactsDto) {
+    return this.contactsService.importMany(requireOrganization(user), dto);
   }
 
   @Get(":id")

@@ -22,6 +22,7 @@ Prefijo global: `/api`
 ## Contacts
 
 - `POST /contacts`: crea contacto dentro de la organizacion activa.
+- `POST /contacts/import`: importa contactos en lote desde filas normalizadas de CSV. Omite duplicados por email o telefono.
 - `GET /contacts`: lista contactos de la organizacion activa. Acepta `?search=`.
 - `GET /contacts/:id`: obtiene contacto con canales, leads y ultimas conversaciones.
 - `PATCH /contacts/:id`: actualiza datos y reemplaza canales si se envian.

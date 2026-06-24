@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { CreateContactDto } from "./dto/create-contact.dto";
+import { ImportContactsDto } from "./dto/import-contacts.dto";
 import { ListContactsQueryDto } from "./dto/list-contacts-query.dto";
 import { UpdateContactDto } from "./dto/update-contact.dto";
 
@@ -132,6 +133,75 @@ export class ContactsService {
     });
 
     return { deleted: true };
+  }
+
+  async importMany(organizationId: string, dto: ImportContactsDto) {
+    const normalizedRows = dto.contacts.map((contact, index) => ({
+      index,
+      fullName: contact.fullName.trim(),
+      phone: contact.phone?.trim() || undefined,
+      email: contact.email?.trim().toLowerCase() || undefined,
+      tags: contact.tags?.map((tag) => tag.trim()).filter(Boolean) ?? []
+    }));
+    const emails = normalizedRows.map((row) => row.email).filter(Boolean) as string[];
+    const phones = normalizedRows.map((row) => row.phone).filter(Boolean) as string[];
+    const existingContacts = await this.prisma.contact.findMany({
+      where: {
+        organizationId,
+        ...(emails.length || phones.length
+          ? {
+              OR: [
+                emails.length ? { email: { in: emails } } : {},
+                phones.length ? { phone: { in: phones } } : {}
+              ].filter((item) => Object.keys(item).length)
+            }
+          : {})
+      },
+      select: { email: true, phone: true }
+    });
+    const seenEmails = new Set(existingContacts.map((contact) => contact.email).filter(Boolean));
+    const seenPhones = new Set(existingContacts.map((contact) => contact.phone).filter(Boolean));
+    const created = [];
+    const skipped = [];
+
+    for (const row of normalizedRows) {
+      const duplicateEmail = row.email ? seenEmails.has(row.email) : false;
+      const duplicatePhone = row.phone ? seenPhones.has(row.phone) : false;
+
+      if (duplicateEmail || duplicatePhone) {
+        skipped.push({
+          row: row.index + 1,
+          fullName: row.fullName,
+          reason: duplicateEmail ? "duplicate_email" : "duplicate_phone"
+        });
+        continue;
+      }
+
+      const contact = await this.prisma.contact.create({
+        data: {
+          organizationId,
+          fullName: row.fullName,
+          phone: row.phone,
+          email: row.email,
+          tags: row.tags
+        }
+      });
+
+      created.push(contact);
+      if (row.email) {
+        seenEmails.add(row.email);
+      }
+      if (row.phone) {
+        seenPhones.add(row.phone);
+      }
+    }
+
+    return {
+      created: created.length,
+      skipped: skipped.length,
+      total: normalizedRows.length,
+      skippedRows: skipped
+    };
   }
 
   private async ensureContactExists(organizationId: string, id: string) {

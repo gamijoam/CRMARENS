@@ -47,6 +47,25 @@ interface Contact {
   tags: string[];
 }
 
+interface ContactImportRow {
+  fullName: string;
+  phone?: string;
+  email?: string;
+  tags: string[];
+  issue?: string;
+}
+
+interface ContactImportResult {
+  created: number;
+  skipped: number;
+  total: number;
+  skippedRows: Array<{
+    row: number;
+    fullName: string;
+    reason: string;
+  }>;
+}
+
 interface PipelineStage {
   id: string;
   name: string;
@@ -340,6 +359,30 @@ export function CrmApp() {
     event.currentTarget.reset();
   }
 
+  async function importContacts(rows: ContactImportRow[]) {
+    setNotice("");
+    try {
+      const result = await api<ContactImportResult>("/contacts/import", {
+        method: "POST",
+        token,
+        body: JSON.stringify({
+          contacts: rows.map((row) => ({
+            fullName: row.fullName,
+            phone: row.phone || undefined,
+            email: row.email || undefined,
+            tags: row.tags
+          }))
+        })
+      });
+      await refreshData();
+      setNotice(`Importacion lista: ${result.created} creados, ${result.skipped} omitidos`);
+      return result;
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo importar");
+      return undefined;
+    }
+  }
+
   async function submitLead(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -585,7 +628,7 @@ export function CrmApp() {
         </section>
 
         {view === "contacts" ? (
-          <ContactsView contacts={contacts} onSubmit={submitContact} />
+          <ContactsView contacts={contacts} onImport={importContacts} onSubmit={submitContact} />
         ) : null}
 
         {view === "leads" ? (
@@ -683,7 +726,42 @@ function Metric({ label, value, detail }: { label: string; value: number; detail
   );
 }
 
-function ContactsView({ contacts, onSubmit }: { contacts: Contact[]; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+function ContactsView({
+  contacts,
+  onImport,
+  onSubmit
+}: {
+  contacts: Contact[];
+  onImport: (rows: ContactImportRow[]) => Promise<ContactImportResult | undefined>;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const [csvText, setCsvText] = useState("fullName,phone,email,tags\nCliente Ejemplo,+584120000000,cliente@example.com,\"prospecto,whatsapp\"");
+  const [previewRows, setPreviewRows] = useState<ContactImportRow[]>([]);
+  const [importResult, setImportResult] = useState<ContactImportResult | undefined>();
+  const validRows = previewRows.filter((row) => !row.issue);
+
+  function previewCsv(text = csvText) {
+    setImportResult(undefined);
+    setPreviewRows(parseContactsCsv(text, contacts));
+  }
+
+  async function importPreviewRows() {
+    const result = await onImport(validRows);
+    setImportResult(result);
+    if (result) {
+      setPreviewRows([]);
+    }
+  }
+
+  async function loadCsvFile(file?: File) {
+    if (!file) {
+      return;
+    }
+    const text = await file.text();
+    setCsvText(text);
+    previewCsv(text);
+  }
+
   return (
     <section className="content-grid">
       <Panel title="Nuevo contacto" eyebrow="CRM">
@@ -694,6 +772,45 @@ function ContactsView({ contacts, onSubmit }: { contacts: Contact[]; onSubmit: (
           <input name="tags" placeholder="Etiquetas separadas por coma" />
           <button className="primary-button"><Plus size={17} /> Crear contacto</button>
         </form>
+      </Panel>
+      <Panel title="Importar CSV" eyebrow="Carga masiva">
+        <div className="import-tools">
+          <input
+            accept=".csv,text/csv"
+            aria-label="Seleccionar archivo CSV"
+            onChange={(event) => void loadCsvFile(event.currentTarget.files?.[0])}
+            type="file"
+          />
+          <textarea
+            onChange={(event) => setCsvText(event.currentTarget.value)}
+            rows={6}
+            value={csvText}
+          />
+          <div className="row-actions import-actions">
+            <button className="secondary-button" onClick={() => previewCsv()} type="button">
+              Previsualizar
+            </button>
+            <button className="primary-button" disabled={!validRows.length} onClick={() => void importPreviewRows()} type="button">
+              Importar {validRows.length || ""}
+            </button>
+          </div>
+        </div>
+        {previewRows.length ? (
+          <div className="import-preview">
+            {previewRows.slice(0, 8).map((row, index) => (
+              <article className={row.issue ? "import-row invalid" : "import-row"} key={`${row.email}-${row.phone}-${index}`}>
+                <strong>{row.fullName || "Sin nombre"}</strong>
+                <span>{[row.phone, row.email, row.tags.join(", ")].filter(Boolean).join(" / ")}</span>
+                {row.issue ? <small>{row.issue}</small> : <small>Listo</small>}
+              </article>
+            ))}
+          </div>
+        ) : null}
+        {importResult ? (
+          <p className="muted-text">
+            Creados: {importResult.created} / Omitidos: {importResult.skipped} / Total: {importResult.total}
+          </p>
+        ) : null}
       </Panel>
       <Panel title="Contactos recientes" eyebrow="Base">
         <DataList items={contacts} empty="Sin contactos">
@@ -709,6 +826,94 @@ function ContactsView({ contacts, onSubmit }: { contacts: Contact[]; onSubmit: (
       </Panel>
     </section>
   );
+}
+
+function parseContactsCsv(csvText: string, existingContacts: Contact[]) {
+  const lines = csvText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) {
+    return [];
+  }
+
+  const [headerLine, ...dataLines] = lines;
+  const headers = splitCsvLine(headerLine).map((header) => normalizeHeader(header));
+  const emailIndex = headers.indexOf("email");
+  const nameIndex = headers.findIndex((header) => ["fullname", "name", "nombre"].includes(header));
+  const phoneIndex = headers.findIndex((header) => ["phone", "telefono", "tel"].includes(header));
+  const tagsIndex = headers.findIndex((header) => ["tags", "etiquetas"].includes(header));
+  const existingEmails = new Set(existingContacts.map((contact) => contact.email?.toLowerCase()).filter(Boolean));
+  const existingPhones = new Set(existingContacts.map((contact) => contact.phone).filter(Boolean));
+  const seenEmails = new Set<string>();
+  const seenPhones = new Set<string>();
+
+  return dataLines.map((line) => {
+    const columns = splitCsvLine(line);
+    const email = emailIndex >= 0 ? columns[emailIndex]?.trim().toLowerCase() : undefined;
+    const phone = phoneIndex >= 0 ? columns[phoneIndex]?.trim() : undefined;
+    const fullName = nameIndex >= 0 ? columns[nameIndex]?.trim() : "";
+    const tags = tagsIndex >= 0 ? splitTags(columns[tagsIndex]) : [];
+    let issue: string | undefined;
+
+    if (!fullName || fullName.length < 2) {
+      issue = "Nombre requerido";
+    } else if (email && existingEmails.has(email)) {
+      issue = "Email ya existe";
+    } else if (phone && existingPhones.has(phone)) {
+      issue = "Telefono ya existe";
+    } else if (email && seenEmails.has(email)) {
+      issue = "Email duplicado en CSV";
+    } else if (phone && seenPhones.has(phone)) {
+      issue = "Telefono duplicado en CSV";
+    }
+
+    if (email) {
+      seenEmails.add(email);
+    }
+    if (phone) {
+      seenPhones.add(phone);
+    }
+
+    return { fullName, phone, email, tags, issue };
+  });
+}
+
+function splitCsvLine(line: string) {
+  const columns: string[] = [];
+  let current = "";
+  let quoted = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const nextChar = line[index + 1];
+
+    if (char === '"' && quoted && nextChar === '"') {
+      current += '"';
+      index += 1;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      columns.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+
+  columns.push(current);
+  return columns;
+}
+
+function splitTags(value?: string) {
+  return String(value ?? "")
+    .split(/[|;,]/)
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
+function normalizeHeader(value: string) {
+  return value.trim().toLowerCase().replace(/[\s_-]/g, "");
 }
 
 function LeadsView({
