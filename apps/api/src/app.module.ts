@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { AuditLogsModule } from "./modules/audit-logs/audit-logs.module";
+import { AssignmentsModule } from "./modules/assignments/assignments.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { ChannelConnectionsModule } from "./modules/channel-connections/channel-connections.module";
 import { ContactsModule } from "./modules/contacts/contacts.module";
@@ -22,6 +23,7 @@ import { PrismaModule } from "./prisma/prisma.module";
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
     AuditLogsModule,
+    AssignmentsModule,
     AuthModule,
     OrganizationsModule,
     UsersModule,

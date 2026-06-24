@@ -502,6 +502,17 @@ h2 {
   grid-column: 1 / -1;
 }
 
+.dashboard-actions-panel {
+  grid-column: 1 / -1;
+}
+
+.automation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
 .dashboard-summary {
   display: grid;
   gap: 12px;

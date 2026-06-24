@@ -11,6 +11,11 @@ Prefijo global: `/api`
 
 - `GET /audit-logs`: lista actividad de la organizacion activa. Acepta `action`, `actorUserId` y `entityType`. Respeta visibilidad por rol.
 
+## Assignments
+
+- `POST /assignments/leads/auto`: asigna automaticamente leads abiertos sin responsable al miembro con menor carga. Requiere rol `owner`, `admin` o `supervisor`.
+- `POST /assignments/conversations/auto`: asigna automaticamente conversaciones abiertas sin responsable al miembro con menor carga. Requiere rol `owner`, `admin` o `supervisor`.
+
 ## Dashboard
 
 - `GET /dashboard`: devuelve metricas operativas de la organizacion activa: resumen comercial, pipeline por etapa, conversaciones por canal, tareas criticas, actividad reciente y carga por usuario. Respeta visibilidad por rol.

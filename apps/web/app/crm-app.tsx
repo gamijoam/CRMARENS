@@ -248,6 +248,13 @@ interface OperationalNotification {
   title: string;
 }
 
+interface AssignmentResult {
+  assigned: number;
+  pending: number;
+  skipped: number;
+  targets: number;
+}
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 
 const navItems: Array<{ id: View; label: string; icon: typeof Inbox }> = [
@@ -708,6 +715,28 @@ export function CrmApp() {
     await mutate(`/tasks/${taskId}/assign`, assignedUserId ? { assignedUserId } : {}, "PATCH");
   }
 
+  async function autoAssignLeads() {
+    await autoAssign("/assignments/leads/auto", "leads");
+  }
+
+  async function autoAssignConversations() {
+    await autoAssign("/assignments/conversations/auto", "chats");
+  }
+
+  async function autoAssign(path: string, label: string) {
+    setNotice("");
+    try {
+      const result = await api<AssignmentResult>(path, {
+        method: "POST",
+        token
+      });
+      await refreshData();
+      setNotice(`Asignacion automatica: ${result.assigned} ${label} asignados a ${result.targets} responsables`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo asignar automaticamente");
+    }
+  }
+
   async function updateChannelConnectionStatus(connectionId: string, status: "active" | "inactive") {
     await mutate(`/channel-connections/${connectionId}/status`, { status }, "PATCH");
   }
@@ -824,7 +853,14 @@ export function CrmApp() {
         </section>
 
         {view === "dashboard" ? (
-          <DashboardView metrics={dashboard} members={teamMembers} onOpenView={setView} />
+          <DashboardView
+            currentUser={user}
+            metrics={dashboard}
+            members={teamMembers}
+            onAutoAssignConversations={autoAssignConversations}
+            onAutoAssignLeads={autoAssignLeads}
+            onOpenView={setView}
+          />
         ) : null}
 
         {view === "contacts" ? (
@@ -999,15 +1035,22 @@ function NotificationCenter({
 }
 
 function DashboardView({
+  currentUser,
   members,
   metrics,
+  onAutoAssignConversations,
+  onAutoAssignLeads,
   onOpenView
 }: {
+  currentUser: SessionUser;
   members: TeamMember[];
   metrics: DashboardMetrics | null;
+  onAutoAssignConversations: () => void;
+  onAutoAssignLeads: () => void;
   onOpenView: (view: View) => void;
 }) {
   const summary = metrics?.summary;
+  const canAutoAssign = ["owner", "admin", "supervisor"].includes(currentUser.role);
   const maxStageCount = Math.max(...(metrics?.pipelineByStage.map((stage) => stage.count) ?? [0]), 1);
   const maxWorkload = Math.max(
     ...(metrics?.workload.map((member) => member.openConversations + member.openLeads + member.openTasks) ?? [0]),
@@ -1054,6 +1097,22 @@ function DashboardView({
           </button>
         </div>
       </Panel>
+
+      {canAutoAssign ? (
+        <Panel eyebrow="Automatizacion" title="Asignacion rapida" className="dashboard-actions-panel">
+          <div className="automation-actions">
+            <button className="secondary-button" onClick={() => onAutoAssignLeads()} type="button">
+              <UserCheck size={17} /> Repartir leads libres
+            </button>
+            <button className="secondary-button" onClick={() => onAutoAssignConversations()} type="button">
+              <MessageSquareText size={17} /> Repartir chats libres
+            </button>
+          </div>
+          <p className="muted-text">
+            Se asigna primero al responsable con menor carga activa para mantener el equipo balanceado.
+          </p>
+        </Panel>
+      ) : null}
 
       <Panel eyebrow="Pipeline" title="Leads abiertos por etapa">
         <div className="dashboard-bars">
@@ -2176,10 +2235,12 @@ function actionLabel(action: string) {
     "contact.created": "Contacto creado",
     "contact.deleted": "Contacto eliminado",
     "contacts.imported": "Contactos importados",
+    "conversations.auto_assigned": "Chats autoasignados",
     "conversation.assigned": "Chat asignado",
     "conversation.closed": "Chat cerrado",
     "conversation.created": "Chat creado",
     "lead.assigned": "Lead asignado",
+    "leads.auto_assigned": "Leads autoasignados",
     "lead.created": "Lead creado",
     "lead.lost": "Lead perdido",
     "lead.open": "Lead abierto",
