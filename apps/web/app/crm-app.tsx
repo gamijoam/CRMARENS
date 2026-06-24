@@ -378,6 +378,21 @@ export function CrmApp() {
   }, [selectedConversationId, token]);
 
   useEffect(() => {
+    if (!token) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void refreshData(token, { silent: true });
+      if (selectedConversationId) {
+        void api<Message[]>(`/conversations/${selectedConversationId}/messages`, { token }).then(setMessages);
+      }
+    }, 8000);
+
+    return () => window.clearInterval(interval);
+  }, [reportDays, selectedConversationId, token]);
+
+  useEffect(() => {
     if (!token || searchQuery.trim().length < 2) {
       setSearchResults(null);
       return;
@@ -451,8 +466,10 @@ export function CrmApp() {
     return response.json() as Promise<T>;
   }
 
-  async function refreshData(activeToken = token) {
-    setLoading(true);
+  async function refreshData(activeToken = token, options: { silent?: boolean } = {}) {
+    if (!options.silent) {
+      setLoading(true);
+    }
     try {
       const [
         nextContacts,
@@ -499,9 +516,13 @@ export function CrmApp() {
         setSelectedConversationId(nextConversations[0].id);
       }
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "No se pudo cargar la data");
+      if (!options.silent) {
+        setNotice(error instanceof Error ? error.message : "No se pudo cargar la data");
+      }
     } finally {
-      setLoading(false);
+      if (!options.silent) {
+        setLoading(false);
+      }
     }
   }
 
