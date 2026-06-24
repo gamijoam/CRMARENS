@@ -2565,6 +2565,7 @@ function actionLabel(action: string) {
     "lead.won": "Lead ganado",
     "message.inbound": "Mensaje entrante",
     "message.outbound": "Mensaje enviado",
+    "message.status_changed": "Estado de mensaje actualizado",
     "note.created": "Nota creada",
     "note.deleted": "Nota eliminada",
     "note.updated": "Nota actualizada",

@@ -116,8 +116,8 @@ Visibilidad operativa: `owner`, `admin` y `supervisor` ven registros de equipo. 
 ## Webhooks
 
 - `GET /webhooks/meta/whatsapp`: verificacion de webhook Meta. Valida `hub.verify_token` contra `META_WHATSAPP_VERIFY_TOKEN` y devuelve `hub.challenge`.
-- `POST /webhooks/meta/whatsapp`: recibe mensajes entrantes de WhatsApp Cloud API. Crea o reutiliza contacto por telefono, crea o reutiliza conversacion WhatsApp abierta, guarda mensaje inbound, actualiza `lastMessageAt` y registra auditoria. Usa `META_WHATSAPP_ORGANIZATION_ID` para resolver la organizacion destino.
+- `POST /webhooks/meta/whatsapp`: recibe mensajes entrantes y estados outbound de WhatsApp Cloud API. Crea o reutiliza contacto por telefono, crea o reutiliza conversacion WhatsApp abierta, guarda mensaje inbound, actualiza `lastMessageAt`, actualiza estados `sent`, `delivered`, `read` o `failed` por `externalMessageId` y registra auditoria. Usa `META_WHATSAPP_ORGANIZATION_ID` para resolver la organizacion destino.
 
 ## Futuro
 
-- Webhooks de estado de mensajes outbound.
+- Mensajes WhatsApp con plantillas y adjuntos.

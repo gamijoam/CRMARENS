@@ -42,6 +42,42 @@ class MetaWhatsAppMessageDto {
   type?: string;
 }
 
+class MetaWhatsAppStatusErrorDto {
+  @IsOptional()
+  @IsString()
+  code?: string;
+
+  @IsOptional()
+  @IsString()
+  message?: string;
+
+  @IsOptional()
+  @IsString()
+  title?: string;
+}
+
+class MetaWhatsAppStatusDto {
+  @IsOptional()
+  @IsArray()
+  errors?: MetaWhatsAppStatusErrorDto[];
+
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  @IsOptional()
+  @IsString()
+  recipient_id?: string;
+
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @IsOptional()
+  @IsString()
+  timestamp?: string;
+}
+
 class MetaWhatsAppValueDto {
   @IsOptional()
   @IsString()
@@ -54,6 +90,10 @@ class MetaWhatsAppValueDto {
   @IsArray()
   @IsOptional()
   messages?: MetaWhatsAppMessageDto[];
+
+  @IsArray()
+  @IsOptional()
+  statuses?: MetaWhatsAppStatusDto[];
 }
 
 class MetaWhatsAppChangeDto {

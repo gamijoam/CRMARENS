@@ -14,6 +14,14 @@ interface IncomingWhatsappMessage {
   type: string;
 }
 
+interface IncomingWhatsappStatus {
+  errors?: Array<Record<string, unknown>>;
+  externalMessageId: string;
+  recipientId?: string;
+  status: string;
+  timestamp?: string;
+}
+
 @Injectable()
 export class WebhooksService {
   constructor(
@@ -38,8 +46,11 @@ export class WebhooksService {
       select: { id: true }
     });
     const messages = this.extractMessages(dto);
+    const statuses = this.extractStatuses(dto);
     let processed = 0;
     let skipped = 0;
+    let statusesProcessed = 0;
+    let statusesSkipped = 0;
 
     for (const message of messages) {
       if (!message.text || message.type !== "text") {
@@ -60,10 +71,22 @@ export class WebhooksService {
       processed += 1;
     }
 
+    for (const status of statuses) {
+      const updated = await this.persistStatusUpdate(organizationId, status, dto);
+      if (updated) {
+        statusesProcessed += 1;
+      } else {
+        statusesSkipped += 1;
+      }
+    }
+
     return {
       processed,
       skipped,
-      received: messages.length
+      received: messages.length,
+      statusesProcessed,
+      statusesReceived: statuses.length,
+      statusesSkipped
     };
   }
 
@@ -92,6 +115,97 @@ export class WebhooksService {
     }
 
     return messages;
+  }
+
+  private extractStatuses(dto: MetaWhatsAppWebhookDto) {
+    const statuses: IncomingWhatsappStatus[] = [];
+
+    for (const entry of dto.entry ?? []) {
+      for (const change of entry.changes ?? []) {
+        for (const status of change.value?.statuses ?? []) {
+          if (!status.id || !status.status) {
+            continue;
+          }
+
+          statuses.push({
+            errors: status.errors as Array<Record<string, unknown>> | undefined,
+            externalMessageId: status.id,
+            recipientId: status.recipient_id,
+            status: status.status,
+            timestamp: status.timestamp
+          });
+        }
+      }
+    }
+
+    return statuses;
+  }
+
+  private async persistStatusUpdate(
+    organizationId: string,
+    status: IncomingWhatsappStatus,
+    rawPayload: MetaWhatsAppWebhookDto
+  ) {
+    const message = await this.prisma.message.findFirst({
+      where: {
+        externalMessageId: status.externalMessageId,
+        conversation: { organizationId }
+      },
+      select: {
+        conversation: {
+          select: { assignedUserId: true, id: true }
+        },
+        id: true,
+        rawPayload: true,
+        status: true
+      }
+    });
+
+    if (!message) {
+      return false;
+    }
+
+    const nextStatus = this.mapMessageStatus(status.status);
+    const rawPayloadValue =
+      message.rawPayload && typeof message.rawPayload === "object" && !Array.isArray(message.rawPayload)
+        ? (message.rawPayload as Record<string, unknown>)
+        : {};
+
+    await this.prisma.message.update({
+      where: { id: message.id },
+      data: {
+        rawPayload: ({
+          ...rawPayloadValue,
+          whatsappStatus: {
+            errors: status.errors,
+            payload: rawPayload,
+            recipientId: status.recipientId,
+            status: status.status,
+            timestamp: status.timestamp
+          }
+        } as unknown) as Prisma.InputJsonValue,
+        status: nextStatus
+      }
+    });
+
+    if (message.status !== nextStatus) {
+      await this.auditLogs.create({
+        action: "message.status_changed",
+        entityId: message.id,
+        entityType: "message",
+        metadata: {
+          assignedUserId: message.conversation.assignedUserId,
+          conversationId: message.conversation.id,
+          externalMessageId: status.externalMessageId,
+          fromStatus: message.status,
+          providerStatus: status.status,
+          status: nextStatus
+        },
+        organizationId
+      });
+    }
+
+    return true;
   }
 
   private async persistIncomingMessage(
@@ -254,5 +368,14 @@ export class WebhooksService {
 
   private normalizePhone(value: string) {
     return value.replace(/[^\d+]/g, "");
+  }
+
+  private mapMessageStatus(status: string) {
+    const normalizedStatus = status.toLowerCase();
+    if (["delivered", "failed", "read", "sent"].includes(normalizedStatus)) {
+      return normalizedStatus;
+    }
+
+    return "sent";
   }
 }
