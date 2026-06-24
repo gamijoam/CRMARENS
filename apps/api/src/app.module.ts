@@ -9,6 +9,7 @@ import { DashboardModule } from "./modules/dashboard/dashboard.module";
 import { LeadsModule } from "./modules/leads/leads.module";
 import { MessagesModule } from "./modules/messages/messages.module";
 import { NotesModule } from "./modules/notes/notes.module";
+import { NotificationsModule } from "./modules/notifications/notifications.module";
 import { OrganizationsModule } from "./modules/organizations/organizations.module";
 import { PipelinesModule } from "./modules/pipelines/pipelines.module";
 import { SearchModule } from "./modules/search/search.module";
@@ -33,6 +34,7 @@ import { PrismaModule } from "./prisma/prisma.module";
     ConversationsModule,
     MessagesModule,
     DashboardModule,
+    NotificationsModule,
     SearchModule
   ]
 })

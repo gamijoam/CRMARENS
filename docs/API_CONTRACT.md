@@ -69,6 +69,10 @@ Crear pipelines y reordenar etapas requiere rol `owner` o `admin`.
 - `PATCH /notes/:id`: actualiza contenido de la nota.
 - `DELETE /notes/:id`: elimina nota.
 
+## Notifications
+
+- `GET /notifications`: devuelve alertas operativas derivadas de datos reales: tareas vencidas, tareas de hoy, chats sin respuesta reciente, chats sin asignar, leads sin responsable y actividad relevante. Respeta visibilidad por rol.
+
 ## Tasks
 
 - `POST /tasks`: crea tarea asociada a contacto o lead.

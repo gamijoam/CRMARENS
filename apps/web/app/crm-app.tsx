@@ -3,6 +3,7 @@
 import {
   AlertTriangle,
   BarChart3,
+  Bell,
   CheckCircle2,
   CircleDot,
   ClipboardList,
@@ -22,7 +23,8 @@ import {
   UserCheck,
   UserMinus,
   UserPlus,
-  UsersRound
+  UsersRound,
+  X
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
@@ -235,6 +237,17 @@ interface DashboardMetrics {
   }>;
 }
 
+interface OperationalNotification {
+  body: string;
+  count?: number;
+  entityId?: string;
+  entityType: string;
+  id: string;
+  priority: "urgent" | "attention" | "info";
+  targetView: View;
+  title: string;
+}
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 
 const navItems: Array<{ id: View; label: string; icon: typeof Inbox }> = [
@@ -265,6 +278,8 @@ export function CrmApp() {
   const [channelConnections, setChannelConnections] = useState<ChannelConnection[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [dashboard, setDashboard] = useState<DashboardMetrics | null>(null);
+  const [notifications, setNotifications] = useState<OperationalNotification[]>([]);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [selectedConversationId, setSelectedConversationId] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [inboxFilter, setInboxFilter] = useState<InboxFilter>("open");
@@ -385,7 +400,8 @@ export function CrmApp() {
         nextTeamMembers,
         nextChannelConnections,
         nextAuditLogs,
-        nextDashboard
+        nextDashboard,
+        nextNotifications
       ] =
         await Promise.all([
           api<Contact[]>("/contacts", { token: activeToken }),
@@ -397,7 +413,8 @@ export function CrmApp() {
           api<TeamMember[]>("/users", { token: activeToken }),
           api<ChannelConnection[]>("/channel-connections", { token: activeToken }),
           api<AuditLog[]>("/audit-logs", { token: activeToken }),
-          api<DashboardMetrics>("/dashboard", { token: activeToken })
+          api<DashboardMetrics>("/dashboard", { token: activeToken }),
+          api<OperationalNotification[]>("/notifications", { token: activeToken })
         ]);
 
       setContacts(nextContacts);
@@ -410,6 +427,7 @@ export function CrmApp() {
       setChannelConnections(nextChannelConnections);
       setAuditLogs(nextAuditLogs);
       setDashboard(nextDashboard);
+      setNotifications(nextNotifications);
       if (!selectedConversationId && nextConversations[0]) {
         setSelectedConversationId(nextConversations[0].id);
       }
@@ -454,6 +472,14 @@ export function CrmApp() {
       setSelectedConversationId(conversationId);
     }
     setSearchResults(null);
+  }
+
+  function openNotification(notification: OperationalNotification) {
+    setView(notification.targetView);
+    if (notification.targetView === "inbox" && notification.entityId) {
+      setSelectedConversationId(notification.entityId);
+    }
+    setNotificationsOpen(false);
   }
 
   async function login(event: FormEvent<HTMLFormElement>) {
@@ -771,6 +797,12 @@ export function CrmApp() {
               onQueryChange={setSearchQuery}
               onStatusChange={setSearchStatus}
             />
+            <NotificationCenter
+              notifications={notifications}
+              open={notificationsOpen}
+              onOpenChange={setNotificationsOpen}
+              onSelect={openNotification}
+            />
             <button className="secondary-button" onClick={() => void refreshData()} type="button">
               {loading ? <Loader2 className="spin" size={18} /> : <CircleDot size={18} />}
               Actualizar
@@ -897,6 +929,72 @@ function Metric({ label, value, detail }: { label: string; value: number; detail
       <strong>{value}</strong>
       <small>{detail}</small>
     </article>
+  );
+}
+
+function NotificationCenter({
+  notifications,
+  onOpenChange,
+  onSelect,
+  open
+}: {
+  notifications: OperationalNotification[];
+  onOpenChange: (open: boolean) => void;
+  onSelect: (notification: OperationalNotification) => void;
+  open: boolean;
+}) {
+  const urgentCount = notifications.filter((notification) => notification.priority === "urgent").length;
+  const badgeCount = notifications.length > 9 ? "9+" : notifications.length;
+
+  return (
+    <div className="notification-center">
+      <button
+        aria-expanded={open}
+        aria-label="Notificaciones"
+        className={`icon-button notification-trigger ${urgentCount ? "has-urgent" : ""}`}
+        onClick={() => onOpenChange(!open)}
+        type="button"
+      >
+        <Bell size={18} />
+        {notifications.length ? <span>{badgeCount}</span> : null}
+      </button>
+
+      {open ? (
+        <section className="notification-panel" aria-label="Notificaciones operativas">
+          <header>
+            <div>
+              <strong>Notificaciones</strong>
+              <small>{notifications.length ? `${notifications.length} pendientes` : "Sin pendientes"}</small>
+            </div>
+            <button aria-label="Cerrar notificaciones" onClick={() => onOpenChange(false)} type="button">
+              <X size={16} />
+            </button>
+          </header>
+
+          <div className="notification-list">
+            {notifications.length ? (
+              notifications.map((notification) => (
+                <button
+                  className={`notification-item ${notification.priority}`}
+                  key={notification.id}
+                  onClick={() => onSelect(notification)}
+                  type="button"
+                >
+                  <span>{priorityLabel(notification.priority)}</span>
+                  <strong>
+                    {notification.title}
+                    {notification.count ? ` (${notification.count})` : ""}
+                  </strong>
+                  <small>{notification.body}</small>
+                </button>
+              ))
+            ) : (
+              <p className="muted-text">Todo esta en orden por ahora.</p>
+            )}
+          </div>
+        </section>
+      ) : null}
+    </div>
   );
 }
 
@@ -2060,6 +2158,15 @@ function channelLabel(channel: string) {
     whatsapp: "WhatsApp"
   };
   return labels[channel] ?? channel;
+}
+
+function priorityLabel(priority: OperationalNotification["priority"]) {
+  const labels: Record<OperationalNotification["priority"], string> = {
+    attention: "Atencion",
+    info: "Info",
+    urgent: "Urgente"
+  };
+  return labels[priority];
 }
 
 function actionLabel(action: string) {
