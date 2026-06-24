@@ -105,6 +105,7 @@ Visibilidad operativa: `owner`, `admin` y `supervisor` ven registros de equipo. 
 ## Messages
 
 - `POST /conversations/:conversationId/messages`: crea mensaje inbound u outbound.
+- Si el mensaje es `outbound`, la conversacion es WhatsApp y existen `META_WHATSAPP_ACCESS_TOKEN` + `META_WHATSAPP_PHONE_NUMBER_ID`, el API envia el texto por WhatsApp Cloud API y guarda el `externalMessageId` devuelto por Meta. Sin credenciales, usa modo simulado.
 - `GET /conversations/:conversationId/messages`: lista mensajes de una conversacion.
 - `PATCH /conversations/:conversationId/messages/:messageId/status`: actualiza estado del mensaje.
 
@@ -119,4 +120,4 @@ Visibilidad operativa: `owner`, `admin` y `supervisor` ven registros de equipo. 
 
 ## Futuro
 
-- Envio outbound real por WhatsApp Cloud API.
+- Webhooks de estado de mensajes outbound.

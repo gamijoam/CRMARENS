@@ -6,12 +6,14 @@ import { AuthenticatedUser } from "../../shared/authenticated-user";
 import { AuditLogsService } from "../audit-logs/audit-logs.service";
 import { CreateMessageDto } from "./dto/create-message.dto";
 import { UpdateMessageStatusDto } from "./dto/update-message-status.dto";
+import { WhatsappCloudService } from "./whatsapp-cloud.service";
 
 @Injectable()
 export class MessagesService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly auditLogs: AuditLogsService
+    private readonly auditLogs: AuditLogsService,
+    private readonly whatsappCloud: WhatsappCloudService
   ) {}
 
   async create(
@@ -26,7 +28,7 @@ export class MessagesService {
       throw new BadRequestException("Text message requires text");
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const message = await this.prisma.$transaction(async (tx) => {
       const message = await tx.message.create({
         data: {
           conversationId,
@@ -65,6 +67,43 @@ export class MessagesService {
 
       return message;
     });
+
+    if (dto.direction === "outbound" && conversation.channel === "whatsapp" && dto.text) {
+      const recipient = this.getWhatsappRecipient(conversation);
+      if (recipient) {
+        const result = await this.whatsappCloud.sendText({
+          text: dto.text,
+          to: recipient
+        });
+
+        return this.prisma.message.update({
+          where: { id: message.id },
+          data: {
+            externalMessageId: result.externalMessageId ?? message.externalMessageId,
+            rawPayload: {
+              ...(dto.rawPayload ?? {}),
+              whatsappCloud: result.rawPayload
+            } as Prisma.InputJsonValue,
+            status: result.status
+          },
+          include: this.messageInclude()
+        });
+      }
+
+      return this.prisma.message.update({
+        where: { id: message.id },
+        data: {
+          rawPayload: {
+            ...(dto.rawPayload ?? {}),
+            whatsappCloud: { error: "missing_whatsapp_recipient" }
+          } as Prisma.InputJsonValue,
+          status: "failed"
+        },
+        include: this.messageInclude()
+      });
+    }
+
+    return message;
   }
 
   async findMany(organizationId: string, user: AuthenticatedUser, conversationId: string) {
@@ -128,7 +167,17 @@ export class MessagesService {
       select: {
         id: true,
         assignedUserId: true,
-        channel: true
+        channel: true,
+        contact: {
+          select: {
+            phone: true,
+            channels: {
+              where: { channel: "whatsapp" },
+              select: { externalId: true },
+              take: 1
+            }
+          }
+        }
       }
     });
 
@@ -137,5 +186,11 @@ export class MessagesService {
     }
 
     return conversation;
+  }
+
+  private getWhatsappRecipient(conversation: {
+    contact: { channels: Array<{ externalId: string }>; phone: string | null };
+  }) {
+    return conversation.contact.channels[0]?.externalId ?? conversation.contact.phone ?? undefined;
   }
 }
