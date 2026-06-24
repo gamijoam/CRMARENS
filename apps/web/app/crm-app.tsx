@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  AlertTriangle,
   BarChart3,
   CheckCircle2,
   CircleDot,
@@ -9,6 +10,7 @@ import {
   History,
   Cable,
   Inbox,
+  LayoutDashboard,
   Loader2,
   LogOut,
   MessageSquareText,
@@ -24,7 +26,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-type View = "inbox" | "contacts" | "leads" | "tasks" | "notes" | "team" | "channels" | "activity";
+type View = "dashboard" | "inbox" | "contacts" | "leads" | "tasks" | "notes" | "team" | "channels" | "activity";
 type InboxFilter = "open" | "mine" | "unassigned" | "closed";
 
 interface SessionUser {
@@ -182,9 +184,61 @@ interface AuditLog {
   metadata?: Record<string, unknown>;
 }
 
+interface DashboardMetrics {
+  summary: {
+    activeConnections: number;
+    contacts: number;
+    dueTodayTasks: number;
+    leads: number;
+    lostLeads: number;
+    openConversations: number;
+    openLeads: number;
+    openTasks: number;
+    overdueTasks: number;
+    teamMembers: number;
+    unassignedConversations: number;
+    wonLeads: number;
+  };
+  pipelineByStage: Array<{
+    count: number;
+    stageId: string;
+    stageName: string;
+    stagePosition: number;
+    value: number;
+  }>;
+  conversationsByChannel: Array<{
+    channel: string;
+    count: number;
+  }>;
+  recentTasks: Array<{
+    id: string;
+    title: string;
+    dueAt?: string;
+    leadId?: string;
+    assignee?: Pick<TeamMember, "id" | "name" | "email"> | null;
+    contact?: Pick<Contact, "id" | "fullName"> | null;
+  }>;
+  recentActivity: Array<{
+    id: string;
+    action: string;
+    actorUserId?: string | null;
+    createdAt: string;
+    entityType: string;
+  }>;
+  workload: Array<{
+    id: string;
+    name: string;
+    email: string;
+    openConversations: number;
+    openLeads: number;
+    openTasks: number;
+  }>;
+}
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 
 const navItems: Array<{ id: View; label: string; icon: typeof Inbox }> = [
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "inbox", label: "Inbox", icon: Inbox },
   { id: "contacts", label: "Contactos", icon: UsersRound },
   { id: "leads", label: "Leads", icon: BarChart3 },
@@ -198,7 +252,7 @@ const navItems: Array<{ id: View; label: string; icon: typeof Inbox }> = [
 export function CrmApp() {
   const [token, setToken] = useState<string>("");
   const [user, setUser] = useState<SessionUser | null>(null);
-  const [view, setView] = useState<View>("inbox");
+  const [view, setView] = useState<View>("dashboard");
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -210,6 +264,7 @@ export function CrmApp() {
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [channelConnections, setChannelConnections] = useState<ChannelConnection[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [dashboard, setDashboard] = useState<DashboardMetrics | null>(null);
   const [selectedConversationId, setSelectedConversationId] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [inboxFilter, setInboxFilter] = useState<InboxFilter>("open");
@@ -329,7 +384,8 @@ export function CrmApp() {
         nextConversations,
         nextTeamMembers,
         nextChannelConnections,
-        nextAuditLogs
+        nextAuditLogs,
+        nextDashboard
       ] =
         await Promise.all([
           api<Contact[]>("/contacts", { token: activeToken }),
@@ -340,7 +396,8 @@ export function CrmApp() {
           api<Conversation[]>("/conversations", { token: activeToken }),
           api<TeamMember[]>("/users", { token: activeToken }),
           api<ChannelConnection[]>("/channel-connections", { token: activeToken }),
-          api<AuditLog[]>("/audit-logs", { token: activeToken })
+          api<AuditLog[]>("/audit-logs", { token: activeToken }),
+          api<DashboardMetrics>("/dashboard", { token: activeToken })
         ]);
 
       setContacts(nextContacts);
@@ -352,6 +409,7 @@ export function CrmApp() {
       setTeamMembers(nextTeamMembers);
       setChannelConnections(nextChannelConnections);
       setAuditLogs(nextAuditLogs);
+      setDashboard(nextDashboard);
       if (!selectedConversationId && nextConversations[0]) {
         setSelectedConversationId(nextConversations[0].id);
       }
@@ -723,11 +781,19 @@ export function CrmApp() {
         {notice ? <p className="status-banner">{notice}</p> : null}
 
         <section className="metrics" aria-label="Metricas principales">
-          <Metric label="Contactos" value={contacts.length} detail="Base comercial" />
-          <Metric label="Leads abiertos" value={openLeads.length} detail="Pipeline activo" />
-          <Metric label="Tareas abiertas" value={openTasks.length} detail="Seguimiento" />
-          <Metric label="Chats abiertos" value={openConversations.length} detail="Inbox" />
+          <Metric label="Contactos" value={dashboard?.summary.contacts ?? contacts.length} detail="Base comercial" />
+          <Metric label="Leads abiertos" value={dashboard?.summary.openLeads ?? openLeads.length} detail="Pipeline activo" />
+          <Metric label="Tareas vencidas" value={dashboard?.summary.overdueTasks ?? 0} detail="Atencion requerida" />
+          <Metric
+            label="Chats abiertos"
+            value={dashboard?.summary.openConversations ?? openConversations.length}
+            detail="Inbox"
+          />
         </section>
+
+        {view === "dashboard" ? (
+          <DashboardView metrics={dashboard} members={teamMembers} onOpenView={setView} />
+        ) : null}
 
         {view === "contacts" ? (
           <ContactsView contacts={contacts} onImport={importContacts} onSubmit={submitContact} />
@@ -811,6 +877,7 @@ export function CrmApp() {
 
 function titleForView(view: View) {
   const titles: Record<View, string> = {
+    dashboard: "Dashboard operativo",
     inbox: "Inbox de conversaciones",
     contacts: "Contactos",
     leads: "Leads y pipeline",
@@ -830,6 +897,163 @@ function Metric({ label, value, detail }: { label: string; value: number; detail
       <strong>{value}</strong>
       <small>{detail}</small>
     </article>
+  );
+}
+
+function DashboardView({
+  members,
+  metrics,
+  onOpenView
+}: {
+  members: TeamMember[];
+  metrics: DashboardMetrics | null;
+  onOpenView: (view: View) => void;
+}) {
+  const summary = metrics?.summary;
+  const maxStageCount = Math.max(...(metrics?.pipelineByStage.map((stage) => stage.count) ?? [0]), 1);
+  const maxWorkload = Math.max(
+    ...(metrics?.workload.map((member) => member.openConversations + member.openLeads + member.openTasks) ?? [0]),
+    1
+  );
+
+  if (!metrics) {
+    return (
+      <section className="dashboard-grid">
+        <Panel eyebrow="Dashboard" title="Cargando metricas" className="wide-panel">
+          <p className="muted-text">Preparando los indicadores operativos.</p>
+        </Panel>
+      </section>
+    );
+  }
+
+  return (
+    <section className="dashboard-grid">
+      <Panel eyebrow="Resumen" title="Pulso comercial" className="dashboard-summary-panel">
+        <div className="dashboard-summary">
+          <button onClick={() => onOpenView("leads")} type="button">
+            <BarChart3 size={18} />
+            <span>Leads ganados</span>
+            <strong>{summary?.wonLeads ?? 0}</strong>
+            <small>{summary?.lostLeads ?? 0} perdidos</small>
+          </button>
+          <button onClick={() => onOpenView("tasks")} type="button">
+            <AlertTriangle size={18} />
+            <span>Vencidas</span>
+            <strong>{summary?.overdueTasks ?? 0}</strong>
+            <small>{summary?.dueTodayTasks ?? 0} vencen hoy</small>
+          </button>
+          <button onClick={() => onOpenView("inbox")} type="button">
+            <MessageSquareText size={18} />
+            <span>Sin asignar</span>
+            <strong>{summary?.unassignedConversations ?? 0}</strong>
+            <small>{summary?.openConversations ?? 0} chats abiertos</small>
+          </button>
+          <button onClick={() => onOpenView("channels")} type="button">
+            <Cable size={18} />
+            <span>Canales activos</span>
+            <strong>{summary?.activeConnections ?? 0}</strong>
+            <small>{summary?.teamMembers ?? 0} usuarios activos</small>
+          </button>
+        </div>
+      </Panel>
+
+      <Panel eyebrow="Pipeline" title="Leads abiertos por etapa">
+        <div className="dashboard-bars">
+          {metrics.pipelineByStage.length ? (
+            metrics.pipelineByStage.map((stage) => (
+              <article key={stage.stageId}>
+                <div>
+                  <strong>{stage.stageName}</strong>
+                  <span>{stage.count} leads / {formatMoney(stage.value)}</span>
+                </div>
+                <div className="bar-track">
+                  <div style={{ width: `${Math.max(8, (stage.count / maxStageCount) * 100)}%` }} />
+                </div>
+              </article>
+            ))
+          ) : (
+            <p className="muted-text">No hay leads abiertos.</p>
+          )}
+        </div>
+      </Panel>
+
+      <Panel eyebrow="Inbox" title="Conversaciones por canal">
+        <div className="channel-mix">
+          {metrics.conversationsByChannel.length ? (
+            metrics.conversationsByChannel.map((item) => (
+              <article key={item.channel}>
+                <span>{channelLabel(item.channel)}</span>
+                <strong>{item.count}</strong>
+              </article>
+            ))
+          ) : (
+            <p className="muted-text">No hay conversaciones abiertas.</p>
+          )}
+        </div>
+      </Panel>
+
+      <Panel eyebrow="Seguimiento" title="Tareas criticas">
+        <div className="dashboard-list">
+          {metrics.recentTasks.length ? (
+            metrics.recentTasks.map((task) => (
+              <article key={task.id}>
+                <div>
+                  <strong>{task.title}</strong>
+                  <span>{task.contact?.fullName ?? "Sin contacto"} / {task.assignee?.name ?? "Sin responsable"}</span>
+                </div>
+                <small>{formatDate(task.dueAt)}</small>
+              </article>
+            ))
+          ) : (
+            <p className="muted-text">No hay tareas abiertas.</p>
+          )}
+        </div>
+      </Panel>
+
+      <Panel eyebrow="Equipo" title="Carga operativa">
+        <div className="workload-list">
+          {metrics.workload.length ? (
+            metrics.workload.map((member) => {
+              const total = member.openConversations + member.openLeads + member.openTasks;
+              return (
+                <article key={member.id}>
+                  <div>
+                    <strong>{member.name}</strong>
+                    <span>{member.openLeads} leads / {member.openTasks} tareas / {member.openConversations} chats</span>
+                  </div>
+                  <div className="bar-track">
+                    <div style={{ width: `${Math.max(8, (total / maxWorkload) * 100)}%` }} />
+                  </div>
+                </article>
+              );
+            })
+          ) : (
+            <p className="muted-text">No hay usuarios activos.</p>
+          )}
+        </div>
+      </Panel>
+
+      <Panel eyebrow="Actividad" title="Ultimos movimientos">
+        <div className="dashboard-list">
+          {metrics.recentActivity.length ? (
+            metrics.recentActivity.map((log) => {
+              const actor = members.find((member) => member.id === log.actorUserId);
+              return (
+                <article key={log.id}>
+                  <div>
+                    <strong>{actionLabel(log.action)}</strong>
+                    <span>{entityLabel(log.entityType)} / {actor?.name ?? "Sistema"}</span>
+                  </div>
+                  <small>{formatDate(log.createdAt)}</small>
+                </article>
+              );
+            })
+          ) : (
+            <p className="muted-text">Sin actividad reciente.</p>
+          )}
+        </div>
+      </Panel>
+    </section>
   );
 }
 
@@ -1809,6 +2033,14 @@ function formatDate(value?: string) {
     minute: "2-digit",
     month: "short"
   }).format(new Date(value));
+}
+
+function formatMoney(value: number) {
+  return new Intl.NumberFormat("es-VE", {
+    currency: "USD",
+    maximumFractionDigits: 0,
+    style: "currency"
+  }).format(value);
 }
 
 function roleLabel(role?: string) {

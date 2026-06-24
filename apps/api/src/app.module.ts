@@ -5,6 +5,7 @@ import { AuthModule } from "./modules/auth/auth.module";
 import { ChannelConnectionsModule } from "./modules/channel-connections/channel-connections.module";
 import { ContactsModule } from "./modules/contacts/contacts.module";
 import { ConversationsModule } from "./modules/conversations/conversations.module";
+import { DashboardModule } from "./modules/dashboard/dashboard.module";
 import { LeadsModule } from "./modules/leads/leads.module";
 import { MessagesModule } from "./modules/messages/messages.module";
 import { NotesModule } from "./modules/notes/notes.module";
@@ -31,6 +32,7 @@ import { PrismaModule } from "./prisma/prisma.module";
     TasksModule,
     ConversationsModule,
     MessagesModule,
+    DashboardModule,
     SearchModule
   ]
 })

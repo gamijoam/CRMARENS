@@ -11,6 +11,10 @@ Prefijo global: `/api`
 
 - `GET /audit-logs`: lista actividad de la organizacion activa. Acepta `action`, `actorUserId` y `entityType`. Respeta visibilidad por rol.
 
+## Dashboard
+
+- `GET /dashboard`: devuelve metricas operativas de la organizacion activa: resumen comercial, pipeline por etapa, conversaciones por canal, tareas criticas, actividad reciente y carga por usuario. Respeta visibilidad por rol.
+
 ## Organizations
 
 - `POST /organizations`: crea organizacion.
