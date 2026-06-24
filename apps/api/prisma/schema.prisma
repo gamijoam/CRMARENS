@@ -39,6 +39,7 @@ model Organization {
   notes Note[]
   tasks Task[]
   conversations Conversation[]
+  channelConnections ChannelConnection[]
   auditLogs AuditLog[]
 
   @@map("organizations")
@@ -111,6 +112,25 @@ model ContactChannel {
 
   @@index([channel, externalId])
   @@map("contact_channels")
+}
+
+model ChannelConnection {
+  id                String   @id @default(cuid())
+  organizationId    String   @map("organization_id")
+  channel           String
+  name              String
+  externalAccountId String?  @map("external_account_id")
+  status            String   @default("active")
+  config            Json?
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+
+  @@index([organizationId, channel, status])
+  @@unique([organizationId, channel, name])
+  @@map("channel_connections")
 }
 
 model Pipeline {
@@ -228,6 +248,7 @@ model Conversation {
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   contact      Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  channelConnection ChannelConnection? @relation(fields: [channelConnectionId], references: [id], onDelete: SetNull)
   assignee     User?        @relation("ConversationAssignee", fields: [assignedUserId], references: [id])
   messages     Message[]
 

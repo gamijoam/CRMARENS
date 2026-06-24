@@ -126,14 +126,72 @@ async function main() {
     }
   });
 
+  const whatsappConnection = await prisma.channelConnection.upsert({
+    where: {
+      organizationId_channel_name: {
+        organizationId: organization.id,
+        channel: "whatsapp",
+        name: "WhatsApp Ventas"
+      }
+    },
+    update: { status: "active" },
+    create: {
+      organizationId: organization.id,
+      channel: "whatsapp",
+      name: "WhatsApp Ventas",
+      externalAccountId: "demo-wa-ventas",
+      status: "active",
+      config: { mode: "simulated" }
+    }
+  });
+
+  await prisma.channelConnection.upsert({
+    where: {
+      organizationId_channel_name: {
+        organizationId: organization.id,
+        channel: "instagram",
+        name: "Instagram Principal"
+      }
+    },
+    update: { status: "active" },
+    create: {
+      organizationId: organization.id,
+      channel: "instagram",
+      name: "Instagram Principal",
+      externalAccountId: "demo-ig-principal",
+      status: "active",
+      config: { mode: "simulated" }
+    }
+  });
+
+  await prisma.channelConnection.upsert({
+    where: {
+      organizationId_channel_name: {
+        organizationId: organization.id,
+        channel: "messenger",
+        name: "Messenger Soporte"
+      }
+    },
+    update: { status: "inactive" },
+    create: {
+      organizationId: organization.id,
+      channel: "messenger",
+      name: "Messenger Soporte",
+      externalAccountId: "demo-msgr-soporte",
+      status: "inactive",
+      config: { mode: "simulated" }
+    }
+  });
+
   const demoConversation = await prisma.conversation.upsert({
     where: { id: "demo-conversation-maria" },
-    update: {},
+    update: { channelConnectionId: whatsappConnection.id },
     create: {
       id: "demo-conversation-maria",
       organizationId: organization.id,
       contactId: demoContact.id,
       channel: "whatsapp",
+      channelConnectionId: whatsappConnection.id,
       assignedUserId: owner.id,
       lastMessageAt: new Date()
     }

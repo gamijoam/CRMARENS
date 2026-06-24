@@ -6,6 +6,7 @@ import {
   CircleDot,
   ClipboardList,
   CornerDownLeft,
+  Cable,
   Inbox,
   Loader2,
   LogOut,
@@ -21,7 +22,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-type View = "inbox" | "contacts" | "leads" | "tasks" | "notes" | "team";
+type View = "inbox" | "contacts" | "leads" | "tasks" | "notes" | "team" | "channels";
 type InboxFilter = "open" | "mine" | "unassigned" | "closed";
 
 interface SessionUser {
@@ -99,6 +100,7 @@ interface Conversation {
   assignedUserId?: string | null;
   lastMessageAt?: string;
   contact: Contact;
+  channelConnection?: Pick<ChannelConnection, "id" | "channel" | "name" | "status">;
   assignee?: TeamMember;
   messages?: Message[];
 }
@@ -124,6 +126,17 @@ interface TeamMember {
   }>;
 }
 
+interface ChannelConnection {
+  id: string;
+  channel: "whatsapp" | "instagram" | "messenger";
+  name: string;
+  externalAccountId?: string;
+  status: "active" | "inactive";
+  _count?: {
+    conversations: number;
+  };
+}
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 
 const navItems: Array<{ id: View; label: string; icon: typeof Inbox }> = [
@@ -132,6 +145,7 @@ const navItems: Array<{ id: View; label: string; icon: typeof Inbox }> = [
   { id: "leads", label: "Leads", icon: BarChart3 },
   { id: "tasks", label: "Tareas", icon: ClipboardList },
   { id: "notes", label: "Notas", icon: StickyNote },
+  { id: "channels", label: "Canales", icon: Cable },
   { id: "team", label: "Equipo", icon: ShieldCheck }
 ];
 
@@ -148,6 +162,7 @@ export function CrmApp() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [channelConnections, setChannelConnections] = useState<ChannelConnection[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [inboxFilter, setInboxFilter] = useState<InboxFilter>("open");
@@ -239,7 +254,16 @@ export function CrmApp() {
   async function refreshData(activeToken = token) {
     setLoading(true);
     try {
-      const [nextContacts, nextPipelines, nextLeads, nextTasks, nextNotes, nextConversations, nextTeamMembers] =
+      const [
+        nextContacts,
+        nextPipelines,
+        nextLeads,
+        nextTasks,
+        nextNotes,
+        nextConversations,
+        nextTeamMembers,
+        nextChannelConnections
+      ] =
         await Promise.all([
           api<Contact[]>("/contacts", { token: activeToken }),
           api<Pipeline[]>("/pipelines", { token: activeToken }),
@@ -247,7 +271,8 @@ export function CrmApp() {
           api<Task[]>("/tasks", { token: activeToken }),
           api<Note[]>("/notes", { token: activeToken }),
           api<Conversation[]>("/conversations", { token: activeToken }),
-          api<TeamMember[]>("/users", { token: activeToken })
+          api<TeamMember[]>("/users", { token: activeToken }),
+          api<ChannelConnection[]>("/channel-connections", { token: activeToken })
         ]);
 
       setContacts(nextContacts);
@@ -257,6 +282,7 @@ export function CrmApp() {
       setNotes(nextNotes);
       setConversations(nextConversations);
       setTeamMembers(nextTeamMembers);
+      setChannelConnections(nextChannelConnections);
       if (!selectedConversationId && nextConversations[0]) {
         setSelectedConversationId(nextConversations[0].id);
       }
@@ -366,10 +392,23 @@ export function CrmApp() {
   async function submitConversation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    const selectedConnection = channelConnections.find((connection) => connection.id === form.get("channelConnectionId"));
     await mutate("/conversations", {
       contactId: form.get("contactId"),
-      channel: form.get("channel"),
+      channel: selectedConnection?.channel ?? form.get("channel"),
+      channelConnectionId: form.get("channelConnectionId") || undefined,
       assignedUserId: user?.id
+    });
+    event.currentTarget.reset();
+  }
+
+  async function submitChannelConnection(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await mutate("/channel-connections", {
+      channel: form.get("channel"),
+      name: form.get("name"),
+      externalAccountId: form.get("externalAccountId") || undefined
     });
     event.currentTarget.reset();
   }
@@ -454,6 +493,10 @@ export function CrmApp() {
 
   async function assignTask(taskId: string, assignedUserId: string) {
     await mutate(`/tasks/${taskId}/assign`, assignedUserId ? { assignedUserId } : {}, "PATCH");
+  }
+
+  async function updateChannelConnectionStatus(connectionId: string, status: "active" | "inactive") {
+    await mutate(`/channel-connections/${connectionId}/status`, { status }, "PATCH");
   }
 
   if (!token || !user) {
@@ -574,8 +617,18 @@ export function CrmApp() {
           <NotesView contacts={contacts} leads={leads} notes={notes} onSubmit={submitNote} />
         ) : null}
 
+        {view === "channels" ? (
+          <ChannelsView
+            connections={channelConnections}
+            currentUser={user}
+            onSubmit={submitChannelConnection}
+            onUpdateStatus={updateChannelConnectionStatus}
+          />
+        ) : null}
+
         {view === "inbox" ? (
           <InboxView
+            channelConnections={channelConnections.filter((connection) => connection.status === "active")}
             contacts={contacts}
             conversations={filteredConversations}
             filter={inboxFilter}
@@ -614,7 +667,8 @@ function titleForView(view: View) {
     leads: "Leads y pipeline",
     tasks: "Tareas",
     notes: "Notas internas",
-    team: "Equipo y permisos"
+    team: "Equipo y permisos",
+    channels: "Canales y conexiones"
   };
   return titles[view];
 }
@@ -859,6 +913,81 @@ function NotesView({
   );
 }
 
+function ChannelsView({
+  connections,
+  currentUser,
+  onSubmit,
+  onUpdateStatus
+}: {
+  connections: ChannelConnection[];
+  currentUser: SessionUser;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onUpdateStatus: (connectionId: string, status: "active" | "inactive") => void;
+}) {
+  const canManage = ["owner", "admin"].includes(currentUser.role);
+  const channelTotals = connections.reduce<Record<string, number>>((totals, connection) => {
+    totals[connection.channel] = (totals[connection.channel] ?? 0) + 1;
+    return totals;
+  }, {});
+
+  return (
+    <section className="content-grid">
+      <Panel title="Nueva conexion" eyebrow="Canales">
+        {canManage ? (
+          <form className="stack-form" onSubmit={onSubmit}>
+            <select name="channel" required>
+              <option value="whatsapp">WhatsApp</option>
+              <option value="instagram">Instagram</option>
+              <option value="messenger">Messenger</option>
+            </select>
+            <input name="name" placeholder="Nombre interno" required />
+            <input name="externalAccountId" placeholder="ID externo simulado" />
+            <button className="primary-button"><Cable size={17} /> Crear conexion</button>
+          </form>
+        ) : (
+          <p className="muted-text">Tu rol puede ver conexiones, pero no modificarlas.</p>
+        )}
+      </Panel>
+
+      <Panel title="Resumen" eyebrow="Omnicanal">
+        <div className="channel-summary">
+          {(["whatsapp", "instagram", "messenger"] as const).map((channel) => (
+            <article key={channel}>
+              <strong>{channelLabel(channel)}</strong>
+              <span>{channelTotals[channel] ?? 0} conexiones</span>
+            </article>
+          ))}
+        </div>
+      </Panel>
+
+      <Panel className="wide-panel" title="Conexiones" eyebrow="Empresa">
+        <DataList items={connections} empty="Sin conexiones">
+          {(connection) => (
+            <Row
+              action={
+                canManage ? (
+                  <button
+                    onClick={() =>
+                      void onUpdateStatus(connection.id, connection.status === "active" ? "inactive" : "active")
+                    }
+                    type="button"
+                  >
+                    {connection.status === "active" ? "Desactivar" : "Activar"}
+                  </button>
+                ) : undefined
+              }
+              badge={connection.status}
+              key={connection.id}
+              meta={`${channelLabel(connection.channel)} / ${connection.externalAccountId ?? "sin ID"} / ${connection._count?.conversations ?? 0} chats`}
+              title={connection.name}
+            />
+          )}
+        </DataList>
+      </Panel>
+    </section>
+  );
+}
+
 function TeamView({
   currentUser,
   members,
@@ -934,6 +1063,7 @@ function AssigneeSelect({
 }
 
 function InboxView({
+  channelConnections,
   contacts,
   conversations,
   filter,
@@ -955,6 +1085,7 @@ function InboxView({
   onSubmitMessage,
   onUnassign
 }: {
+  channelConnections: ChannelConnection[];
   contacts: Contact[];
   conversations: Conversation[];
   filter: InboxFilter;
@@ -998,6 +1129,14 @@ function InboxView({
             <option value="instagram">Instagram</option>
             <option value="messenger">Messenger</option>
           </select>
+          <select name="channelConnectionId">
+            <option value="">Sin conexion asignada</option>
+            {channelConnections.map((connection) => (
+              <option key={connection.id} value={connection.id}>
+                {channelLabel(connection.channel)} / {connection.name}
+              </option>
+            ))}
+          </select>
           <button className="primary-button"><MessageSquareText size={17} /> Crear chat</button>
         </form>
 
@@ -1026,7 +1165,7 @@ function InboxView({
               <span className="conversation-main">
                 <strong>{conversation.contact.fullName}</strong>
                 <small>{conversation.channel} · {conversation.status}</small>
-                <em>{conversation.messages?.[0]?.text ?? "Sin mensajes recientes"}</em>
+                <em>{conversation.channelConnection?.name ?? conversation.messages?.[0]?.text ?? "Sin mensajes recientes"}</em>
               </span>
               <span className="conversation-meta">
                 {conversation.assignedUserId === user.id ? "Mio" : conversation.assignedUserId ? "Asignado" : "Libre"}
@@ -1165,6 +1304,15 @@ function roleLabel(role?: string) {
     supervisor: "Supervisor"
   };
   return role ? labels[role] ?? role : "Sin rol";
+}
+
+function channelLabel(channel: string) {
+  const labels: Record<string, string> = {
+    instagram: "Instagram",
+    messenger: "Messenger",
+    whatsapp: "WhatsApp"
+  };
+  return labels[channel] ?? channel;
 }
 
 function Panel({

@@ -11,6 +11,9 @@ export class ConversationsService {
 
   async create(organizationId: string, dto: CreateConversationDto) {
     await this.ensureContactExists(organizationId, dto.contactId);
+    if (dto.channelConnectionId) {
+      await this.ensureChannelConnectionExists(organizationId, dto.channelConnectionId, dto.channel);
+    }
     if (dto.assignedUserId) {
       await this.ensureOrganizationUserExists(organizationId, dto.assignedUserId);
     }
@@ -107,6 +110,14 @@ export class ConversationsService {
           name: true,
           email: true
         }
+      },
+      channelConnection: {
+        select: {
+          id: true,
+          channel: true,
+          name: true,
+          status: true
+        }
       }
     } satisfies Prisma.ConversationInclude;
   }
@@ -140,5 +151,23 @@ export class ConversationsService {
     }
 
     return organizationUser;
+  }
+
+  private async ensureChannelConnectionExists(organizationId: string, id: string, channel: string) {
+    const connection = await this.prisma.channelConnection.findFirst({
+      where: {
+        id,
+        organizationId,
+        channel,
+        status: "active"
+      },
+      select: { id: true }
+    });
+
+    if (!connection) {
+      throw new NotFoundException("Channel connection not found");
+    }
+
+    return connection;
   }
 }

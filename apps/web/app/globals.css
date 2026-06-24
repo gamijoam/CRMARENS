@@ -475,6 +475,27 @@ textarea:focus {
   gap: 14px;
 }
 
+.channel-summary {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.channel-summary article {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  min-height: 86px;
+  padding: 14px;
+}
+
+.channel-summary span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .pipeline-row {
   align-items: center;
   display: grid;

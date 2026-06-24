@@ -27,6 +27,13 @@ Prefijo global: `/api`
 - `PATCH /contacts/:id`: actualiza datos y reemplaza canales si se envian.
 - `DELETE /contacts/:id`: elimina contacto de la organizacion activa.
 
+## Channel Connections
+
+- `POST /channel-connections`: crea conexion simulada por canal. Requiere rol `owner` o `admin`.
+- `GET /channel-connections`: lista conexiones de la organizacion activa.
+- `GET /channel-connections/:id`: obtiene conexion de la organizacion activa.
+- `PATCH /channel-connections/:id/status`: activa o desactiva conexion. Requiere rol `owner` o `admin`.
+
 ## Pipelines
 
 - `POST /pipelines`: crea pipeline con etapas personalizadas u opciones por defecto.
@@ -62,7 +69,7 @@ Prefijo global: `/api`
 
 ## Conversations
 
-- `POST /conversations`: crea conversacion asociada a contacto.
+- `POST /conversations`: crea conversacion asociada a contacto. Puede recibir `channelConnectionId`.
 - `GET /conversations`: lista conversaciones. Acepta `status`, `assignedUserId`, `contactId` y `channel`.
 - `GET /conversations/:id`: obtiene conversacion con contacto y mensajes.
 - `PATCH /conversations/:id/assign`: asigna o libera vendedor.

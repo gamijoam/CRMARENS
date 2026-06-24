@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { AuthModule } from "./modules/auth/auth.module";
+import { ChannelConnectionsModule } from "./modules/channel-connections/channel-connections.module";
 import { ContactsModule } from "./modules/contacts/contacts.module";
 import { ConversationsModule } from "./modules/conversations/conversations.module";
 import { LeadsModule } from "./modules/leads/leads.module";
@@ -19,6 +20,7 @@ import { PrismaModule } from "./prisma/prisma.module";
     AuthModule,
     OrganizationsModule,
     UsersModule,
+    ChannelConnectionsModule,
     ContactsModule,
     PipelinesModule,
     LeadsModule,
