@@ -13,6 +13,7 @@ import { NotesModule } from "./modules/notes/notes.module";
 import { NotificationsModule } from "./modules/notifications/notifications.module";
 import { OrganizationsModule } from "./modules/organizations/organizations.module";
 import { PipelinesModule } from "./modules/pipelines/pipelines.module";
+import { ReportsModule } from "./modules/reports/reports.module";
 import { SearchModule } from "./modules/search/search.module";
 import { TasksModule } from "./modules/tasks/tasks.module";
 import { UsersModule } from "./modules/users/users.module";
@@ -37,6 +38,7 @@ import { PrismaModule } from "./prisma/prisma.module";
     MessagesModule,
     DashboardModule,
     NotificationsModule,
+    ReportsModule,
     SearchModule
   ]
 })

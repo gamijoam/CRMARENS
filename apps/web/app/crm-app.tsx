@@ -8,6 +8,8 @@ import {
   CircleDot,
   ClipboardList,
   CornerDownLeft,
+  Download,
+  FileText,
   History,
   Cable,
   Inbox,
@@ -28,7 +30,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-type View = "dashboard" | "inbox" | "contacts" | "leads" | "tasks" | "notes" | "team" | "channels" | "activity";
+type View = "dashboard" | "inbox" | "contacts" | "leads" | "tasks" | "notes" | "team" | "channels" | "activity" | "reports";
 type InboxFilter = "open" | "mine" | "unassigned" | "sla" | "closed";
 type SlaState = "ok" | "warning" | "breached";
 
@@ -264,6 +266,46 @@ interface AssignmentResult {
   targets: number;
 }
 
+interface ReportSummary {
+  period: {
+    days: number;
+    from: string;
+    to: string;
+  };
+  summary: {
+    activities: number;
+    chatsBreachedSla: number;
+    chatsClosed: number;
+    chatsOpened: number;
+    chatsWarningSla: number;
+    leadsCreated: number;
+    leadsLost: number;
+    leadsOpen: number;
+    leadsValue: number;
+    leadsWon: number;
+    tasksCompleted: number;
+    tasksCreated: number;
+    tasksOverdue: number;
+  };
+  activityByType: Array<{ count: number; name: string }>;
+  activityByUser: Array<{
+    activity: number;
+    closedConversations: number;
+    id: string;
+    leadsWon: number;
+    name: string;
+  }>;
+  conversationsByChannel: Array<{ channel: string; count: number }>;
+  leadsByStatus: Array<{ count: number; name: string }>;
+  topAssignees: Array<{
+    conversations: number;
+    id: string;
+    leads: number;
+    name: string;
+    tasks: number;
+  }>;
+}
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 
 const navItems: Array<{ id: View; label: string; icon: typeof Inbox }> = [
@@ -275,7 +317,8 @@ const navItems: Array<{ id: View; label: string; icon: typeof Inbox }> = [
   { id: "notes", label: "Notas", icon: StickyNote },
   { id: "channels", label: "Canales", icon: Cable },
   { id: "team", label: "Equipo", icon: ShieldCheck },
-  { id: "activity", label: "Actividad", icon: History }
+  { id: "activity", label: "Actividad", icon: History },
+  { id: "reports", label: "Reportes", icon: FileText }
 ];
 
 export function CrmApp() {
@@ -296,6 +339,8 @@ export function CrmApp() {
   const [dashboard, setDashboard] = useState<DashboardMetrics | null>(null);
   const [notifications, setNotifications] = useState<OperationalNotification[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [reportDays, setReportDays] = useState(30);
+  const [report, setReport] = useState<ReportSummary | null>(null);
   const [selectedConversationId, setSelectedConversationId] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [inboxFilter, setInboxFilter] = useState<InboxFilter>("open");
@@ -420,7 +465,8 @@ export function CrmApp() {
         nextChannelConnections,
         nextAuditLogs,
         nextDashboard,
-        nextNotifications
+        nextNotifications,
+        nextReport
       ] =
         await Promise.all([
           api<Contact[]>("/contacts", { token: activeToken }),
@@ -433,7 +479,8 @@ export function CrmApp() {
           api<ChannelConnection[]>("/channel-connections", { token: activeToken }),
           api<AuditLog[]>("/audit-logs", { token: activeToken }),
           api<DashboardMetrics>("/dashboard", { token: activeToken }),
-          api<OperationalNotification[]>("/notifications", { token: activeToken })
+          api<OperationalNotification[]>("/notifications", { token: activeToken }),
+          api<ReportSummary>(`/reports/summary?days=${reportDays}`, { token: activeToken })
         ]);
 
       setContacts(nextContacts);
@@ -447,6 +494,7 @@ export function CrmApp() {
       setAuditLogs(nextAuditLogs);
       setDashboard(nextDashboard);
       setNotifications(nextNotifications);
+      setReport(nextReport);
       if (!selectedConversationId && nextConversations[0]) {
         setSelectedConversationId(nextConversations[0].id);
       }
@@ -749,6 +797,24 @@ export function CrmApp() {
     }
   }
 
+  async function changeReportDays(days: number) {
+    setReportDays(days);
+    try {
+      const nextReport = await api<ReportSummary>(`/reports/summary?days=${days}`, { token });
+      setReport(nextReport);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo cargar el reporte");
+    }
+  }
+
+  function exportReportCsv() {
+    if (!report) {
+      return;
+    }
+
+    downloadCsv(`crm-report-${report.period.days}d.csv`, reportToCsv(report));
+  }
+
   async function updateChannelConnectionStatus(connectionId: string, status: "active" | "inactive") {
     await mutate(`/channel-connections/${connectionId}/status`, { status }, "PATCH");
   }
@@ -950,6 +1016,15 @@ export function CrmApp() {
         {view === "activity" ? (
           <ActivityView logs={auditLogs} members={teamMembers} />
         ) : null}
+
+        {view === "reports" ? (
+          <ReportsView
+            days={reportDays}
+            report={report}
+            onDaysChange={changeReportDays}
+            onExport={exportReportCsv}
+          />
+        ) : null}
       </section>
     </main>
   );
@@ -965,7 +1040,8 @@ function titleForView(view: View) {
     notes: "Notas internas",
     team: "Equipo y permisos",
     channels: "Canales y conexiones",
-    activity: "Actividad"
+    activity: "Actividad",
+    reports: "Reportes"
   };
   return titles[view];
 }
@@ -1973,6 +2049,163 @@ function ActivityView({ logs, members }: { logs: AuditLog[]; members: TeamMember
   );
 }
 
+function ReportsView({
+  days,
+  onDaysChange,
+  onExport,
+  report
+}: {
+  days: number;
+  onDaysChange: (days: number) => void;
+  onExport: () => void;
+  report: ReportSummary | null;
+}) {
+  const maxAssigneeLoad = Math.max(
+    ...(report?.topAssignees.map((item) => item.conversations + item.leads + item.tasks) ?? [0]),
+    1
+  );
+
+  if (!report) {
+    return (
+      <section className="reports-grid">
+        <Panel eyebrow="Reportes" title="Cargando reporte" className="wide-panel">
+          <p className="muted-text">Preparando el resumen ejecutivo.</p>
+        </Panel>
+      </section>
+    );
+  }
+
+  return (
+    <section className="reports-grid">
+      <Panel eyebrow="Periodo" title="Resumen ejecutivo" className="wide-panel">
+        <div className="report-toolbar">
+          <select onChange={(event) => void onDaysChange(Number(event.currentTarget.value))} value={days}>
+            <option value={7}>Ultimos 7 dias</option>
+            <option value={30}>Ultimos 30 dias</option>
+            <option value={90}>Ultimos 90 dias</option>
+            <option value={365}>Ultimos 365 dias</option>
+          </select>
+          <button className="secondary-button" onClick={onExport} type="button">
+            <Download size={17} /> Exportar CSV
+          </button>
+        </div>
+        <p className="muted-text">
+          {formatDate(report.period.from)} a {formatDate(report.period.to)}
+        </p>
+      </Panel>
+
+      <section className="report-metrics wide-panel" aria-label="Metricas del reporte">
+        <Metric label="Leads creados" value={report.summary.leadsCreated} detail={`${report.summary.leadsWon} ganados`} />
+        <Metric label="Valor estimado" value={Math.round(report.summary.leadsValue)} detail="USD en pipeline" />
+        <Metric label="Tareas creadas" value={report.summary.tasksCreated} detail={`${report.summary.tasksCompleted} completadas`} />
+        <Metric label="Chats abiertos" value={report.summary.chatsOpened} detail={`${report.summary.chatsClosed} cerrados`} />
+      </section>
+
+      <Panel eyebrow="SLA" title="Atencion de chats">
+        <div className="sla-summary">
+          <article className="ok">
+            <span>En tiempo</span>
+            <strong>
+              {Math.max(
+                report.summary.chatsOpened - report.summary.chatsWarningSla - report.summary.chatsBreachedSla,
+                0
+              )}
+            </strong>
+          </article>
+          <article className="warning">
+            <span>En riesgo</span>
+            <strong>{report.summary.chatsWarningSla}</strong>
+          </article>
+          <article className="breached">
+            <span>Vencidas</span>
+            <strong>{report.summary.chatsBreachedSla}</strong>
+          </article>
+        </div>
+      </Panel>
+
+      <Panel eyebrow="Ventas" title="Leads por estado">
+        <ReportList
+          empty="Sin leads en el periodo"
+          items={report.leadsByStatus.map((item) => ({ label: statusLabel(item.name), value: item.count }))}
+        />
+      </Panel>
+
+      <Panel eyebrow="Canales" title="Conversaciones por canal">
+        <ReportList
+          empty="Sin conversaciones en el periodo"
+          items={report.conversationsByChannel.map((item) => ({ label: channelLabel(item.channel), value: item.count }))}
+        />
+      </Panel>
+
+      <Panel eyebrow="Actividad" title="Movimientos por tipo">
+        <ReportList
+          empty="Sin actividad en el periodo"
+          items={report.activityByType.map((item) => ({ label: entityLabel(item.name), value: item.count }))}
+        />
+      </Panel>
+
+      <Panel eyebrow="Equipo" title="Carga por responsable" className="wide-panel">
+        <div className="workload-list">
+          {report.topAssignees.length ? (
+            report.topAssignees.map((member) => {
+              const total = member.conversations + member.leads + member.tasks;
+              return (
+                <article key={member.id}>
+                  <div>
+                    <strong>{member.name}</strong>
+                    <span>{member.leads} leads / {member.tasks} tareas / {member.conversations} chats</span>
+                  </div>
+                  <div className="bar-track">
+                    <div style={{ width: `${Math.max(8, (total / maxAssigneeLoad) * 100)}%` }} />
+                  </div>
+                </article>
+              );
+            })
+          ) : (
+            <p className="muted-text">Sin responsables activos.</p>
+          )}
+        </div>
+      </Panel>
+
+      <Panel eyebrow="Equipo" title="Actividad por usuario" className="wide-panel">
+        <div className="report-table">
+          <div>
+            <strong>Usuario</strong>
+            <strong>Actividad</strong>
+            <strong>Leads ganados</strong>
+            <strong>Chats cerrados</strong>
+          </div>
+          {report.activityByUser.map((member) => (
+            <div key={member.id}>
+              <span>{member.name}</span>
+              <span>{member.activity}</span>
+              <span>{member.leadsWon}</span>
+              <span>{member.closedConversations}</span>
+            </div>
+          ))}
+        </div>
+      </Panel>
+    </section>
+  );
+}
+
+function ReportList({ empty, items }: { empty: string; items: Array<{ label: string; value: number }> }) {
+  return (
+    <div className="report-list">
+      {items.length ? (
+        items.map((item) => (
+          <article key={item.label}>
+            <span>{item.label}</span>
+            <strong>{item.value}</strong>
+          </article>
+        ))
+      ) : (
+        <p className="muted-text">{empty}</p>
+      )}
+    </div>
+  );
+}
+
 function SlaPill({ sla }: { sla: { elapsedHours: number; label: string; state: SlaState } }) {
   return <span className={`sla-pill ${sla.state}`}>{sla.label}</span>;
 }
@@ -2292,6 +2525,18 @@ function channelLabel(channel: string) {
   return labels[channel] ?? channel;
 }
 
+function statusLabel(status: string) {
+  const labels: Record<string, string> = {
+    canceled: "Cancelado",
+    closed: "Cerrado",
+    done: "Completado",
+    lost: "Perdido",
+    open: "Abierto",
+    won: "Ganado"
+  };
+  return labels[status] ?? status;
+}
+
 function priorityLabel(priority: OperationalNotification["priority"]) {
   const labels: Record<OperationalNotification["priority"], string> = {
     attention: "Atencion",
@@ -2345,6 +2590,46 @@ function entityLabel(entityType: string) {
     user: "Usuario"
   };
   return labels[entityType] ?? entityType;
+}
+
+function reportToCsv(report: ReportSummary) {
+  const rows = [
+    ["Seccion", "Metrica", "Valor"],
+    ["Periodo", "Dias", report.period.days],
+    ["Resumen", "Leads creados", report.summary.leadsCreated],
+    ["Resumen", "Leads ganados", report.summary.leadsWon],
+    ["Resumen", "Leads perdidos", report.summary.leadsLost],
+    ["Resumen", "Valor estimado", report.summary.leadsValue],
+    ["Resumen", "Tareas creadas", report.summary.tasksCreated],
+    ["Resumen", "Tareas completadas", report.summary.tasksCompleted],
+    ["Resumen", "Tareas vencidas", report.summary.tasksOverdue],
+    ["Resumen", "Chats abiertos", report.summary.chatsOpened],
+    ["Resumen", "Chats cerrados", report.summary.chatsClosed],
+    ["SLA", "Chats en riesgo", report.summary.chatsWarningSla],
+    ["SLA", "Chats vencidos", report.summary.chatsBreachedSla],
+    ...report.conversationsByChannel.map((item) => ["Canales", channelLabel(item.channel), item.count]),
+    ...report.leadsByStatus.map((item) => ["Leads", statusLabel(item.name), item.count]),
+    ...report.activityByUser.map((item) => ["Usuario", `${item.name} actividad`, item.activity]),
+    ...report.activityByUser.map((item) => ["Usuario", `${item.name} leads ganados`, item.leadsWon]),
+    ...report.activityByUser.map((item) => ["Usuario", `${item.name} chats cerrados`, item.closedConversations])
+  ];
+
+  return rows.map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+function csvCell(value: string | number) {
+  const text = String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function downloadCsv(filename: string, content: string) {
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  window.URL.revokeObjectURL(url);
 }
 
 function Panel({

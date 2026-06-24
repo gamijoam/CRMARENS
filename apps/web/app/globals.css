@@ -491,6 +491,74 @@ h2 {
   grid-template-columns: minmax(320px, 0.8fr) minmax(0, 1.2fr);
 }
 
+.reports-grid {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.report-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.report-toolbar select {
+  max-width: 220px;
+}
+
+.report-metrics {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.report-list {
+  display: grid;
+  gap: 10px;
+}
+
+.report-list article {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  min-height: 48px;
+  padding: 10px 12px;
+}
+
+.report-list span,
+.report-table span {
+  color: var(--muted);
+}
+
+.report-table {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.report-table div {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(180px, 1.4fr) repeat(3, minmax(90px, 0.7fr));
+  padding: 11px 12px;
+}
+
+.report-table div:first-child {
+  background: var(--surface-soft);
+}
+
+.report-table div + div {
+  border-top: 1px solid var(--border);
+}
+
 .dashboard-grid {
   align-items: start;
   display: grid;
@@ -1150,13 +1218,15 @@ textarea:focus {
   .login-panel,
   .content-grid,
   .dashboard-grid,
+  .reports-grid,
   .inbox-layout {
     grid-template-columns: 1fr;
   }
 
   .metrics,
   .dashboard-summary,
-  .sla-summary {
+  .sla-summary,
+  .report-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1184,6 +1254,7 @@ textarea:focus {
   .metrics,
   .dashboard-summary,
   .sla-summary,
+  .report-metrics,
   .channel-mix,
   .nav-list {
     grid-template-columns: 1fr;
@@ -1192,6 +1263,7 @@ textarea:focus {
   .topbar,
   .topbar-tools,
   .dashboard-bars article > div:first-child,
+  .report-list article,
   .data-row,
   .dashboard-list article,
   .conversation-row {
@@ -1205,5 +1277,13 @@ textarea:focus {
 
   .message-bubble {
     max-width: 100%;
+  }
+
+  .report-table {
+    overflow-x: auto;
+  }
+
+  .report-table div {
+    min-width: 560px;
   }
 }

@@ -79,6 +79,10 @@ Crear pipelines y reordenar etapas requiere rol `owner` o `admin`.
 
 - `GET /notifications`: devuelve alertas operativas derivadas de datos reales: tareas vencidas, tareas de hoy, SLA de chats, chats sin asignar, leads sin responsable y actividad relevante. Respeta visibilidad por rol.
 
+## Reports
+
+- `GET /reports/summary?days=30`: devuelve resumen ejecutivo por periodo: leads, tareas, chats, SLA, actividad por usuario, canales, estados y carga por responsable. `days` acepta 1 a 365. Respeta visibilidad por rol.
+
 ## Tasks
 
 - `POST /tasks`: crea tarea asociada a contacto o lead.
