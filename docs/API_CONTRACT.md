@@ -57,8 +57,20 @@ Prefijo global: `/api`
 - `PATCH /tasks/:id`: actualiza titulo, descripcion, vencimiento o asignacion.
 - `PATCH /tasks/:id/status`: cambia estado entre `open`, `done` y `canceled`.
 
+## Conversations
+
+- `POST /conversations`: crea conversacion asociada a contacto.
+- `GET /conversations`: lista conversaciones. Acepta `status`, `assignedUserId`, `contactId` y `channel`.
+- `GET /conversations/:id`: obtiene conversacion con contacto y mensajes.
+- `PATCH /conversations/:id/assign`: asigna o libera vendedor.
+- `PATCH /conversations/:id/close`: cierra conversacion.
+
+## Messages
+
+- `POST /conversations/:conversationId/messages`: crea mensaje inbound u outbound.
+- `GET /conversations/:conversationId/messages`: lista mensajes de una conversacion.
+- `PATCH /conversations/:conversationId/messages/:messageId/status`: actualiza estado del mensaje.
+
 ## Futuro
 
-- `GET /conversations`
-- `POST /conversations/:id/messages`
 - `POST /webhooks/meta/whatsapp`
