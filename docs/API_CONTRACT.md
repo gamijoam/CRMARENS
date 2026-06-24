@@ -26,10 +26,23 @@ Prefijo global: `/api`
 - `PATCH /contacts/:id`: actualiza datos y reemplaza canales si se envian.
 - `DELETE /contacts/:id`: elimina contacto de la organizacion activa.
 
+## Pipelines
+
+- `POST /pipelines`: crea pipeline con etapas personalizadas u opciones por defecto.
+- `GET /pipelines`: lista pipelines con etapas y conteo de leads.
+- `GET /pipelines/:id`: obtiene pipeline con etapas.
+- `PATCH /pipelines/:id/stages/reorder`: reordena etapas existentes.
+
+## Leads
+
+- `POST /leads`: crea oportunidad asociada a un contacto.
+- `GET /leads`: lista leads. Acepta `pipelineId`, `stageId` y `status`.
+- `GET /leads/:id`: obtiene lead con contacto, pipeline, etapa y vendedor asignado.
+- `PATCH /leads/:id/stage`: mueve lead a otra etapa del mismo pipeline.
+- `PATCH /leads/:id/status`: cambia estado entre `open`, `won` y `lost`.
+
 ## Futuro
 
-- `POST /leads`
-- `PATCH /leads/:id/stage`
 - `GET /conversations`
 - `POST /conversations/:id/messages`
 - `POST /webhooks/meta/whatsapp`
