@@ -112,6 +112,11 @@ Visibilidad operativa: `owner`, `admin` y `supervisor` ven registros de equipo. 
 
 - `GET /search?q=`: busqueda global en la organizacion activa. Devuelve contactos, leads, tareas, notas y conversaciones. Acepta `status`, `assignedUserId` y `channel`.
 
+## Webhooks
+
+- `GET /webhooks/meta/whatsapp`: verificacion de webhook Meta. Valida `hub.verify_token` contra `META_WHATSAPP_VERIFY_TOKEN` y devuelve `hub.challenge`.
+- `POST /webhooks/meta/whatsapp`: recibe mensajes entrantes de WhatsApp Cloud API. Crea o reutiliza contacto por telefono, crea o reutiliza conversacion WhatsApp abierta, guarda mensaje inbound, actualiza `lastMessageAt` y registra auditoria. Usa `META_WHATSAPP_ORGANIZATION_ID` para resolver la organizacion destino.
+
 ## Futuro
 
-- `POST /webhooks/meta/whatsapp`
+- Envio outbound real por WhatsApp Cloud API.

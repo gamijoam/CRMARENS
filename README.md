@@ -35,3 +35,15 @@ Credenciales demo luego del seed:
 - API: `http://localhost:3001/api`
 - PostgreSQL: `localhost:5432`
 - Redis: `localhost:6379`
+
+## Webhook WhatsApp Meta
+
+Variables en `apps/api/.env`:
+
+- `META_WHATSAPP_VERIFY_TOKEN`: token que configuras en Meta para validar el webhook.
+- `META_WHATSAPP_ORGANIZATION_ID`: organizacion destino dentro del CRM.
+
+Endpoints:
+
+- `GET /api/webhooks/meta/whatsapp`
+- `POST /api/webhooks/meta/whatsapp`

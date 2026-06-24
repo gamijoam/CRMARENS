@@ -17,6 +17,7 @@ import { ReportsModule } from "./modules/reports/reports.module";
 import { SearchModule } from "./modules/search/search.module";
 import { TasksModule } from "./modules/tasks/tasks.module";
 import { UsersModule } from "./modules/users/users.module";
+import { WebhooksModule } from "./modules/webhooks/webhooks.module";
 import { PrismaModule } from "./prisma/prisma.module";
 
 @Module({
@@ -39,7 +40,8 @@ import { PrismaModule } from "./prisma/prisma.module";
     DashboardModule,
     NotificationsModule,
     ReportsModule,
-    SearchModule
+    SearchModule,
+    WebhooksModule
   ]
 })
 export class AppModule {}
