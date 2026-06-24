@@ -19,9 +19,9 @@ export class InstagramCloudService {
   async sendText(input: SendTextInput): Promise<SendTextResult> {
     const accessToken = this.config.get<string>("META_INSTAGRAM_ACCESS_TOKEN");
     const instagramBusinessAccountId = this.config.get<string>("META_INSTAGRAM_BUSINESS_ACCOUNT_ID");
-    const graphVersion = this.config.get<string>("META_GRAPH_API_VERSION") ?? "v23.0";
+    const graphVersion = this.config.get<string>("META_INSTAGRAM_API_VERSION") ?? "v25.0";
 
-    if (!accessToken || !instagramBusinessAccountId) {
+    if (!accessToken) {
       return {
         externalMessageId: `ig-simulated-${Date.now()}`,
         rawPayload: {
@@ -35,7 +35,7 @@ export class InstagramCloudService {
 
     try {
       const response = await fetch(
-        `https://graph.facebook.com/${graphVersion}/${instagramBusinessAccountId}/messages`,
+        `https://graph.instagram.com/${graphVersion}/me/messages`,
         {
           method: "POST",
           headers: {
@@ -59,7 +59,10 @@ export class InstagramCloudService {
 
       return {
         externalMessageId: typeof payload.message_id === "string" ? payload.message_id : undefined,
-        rawPayload: payload,
+        rawPayload: {
+          ...payload,
+          instagramBusinessAccountId
+        },
         status: "sent"
       };
     } catch (error) {

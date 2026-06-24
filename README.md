@@ -44,7 +44,7 @@ Variables en `apps/api/.env`:
 - `META_WHATSAPP_ORGANIZATION_ID`: organizacion destino dentro del CRM.
 - `META_WHATSAPP_ACCESS_TOKEN`: token de acceso con permiso `whatsapp_business_messaging`.
 - `META_WHATSAPP_PHONE_NUMBER_ID`: ID del numero emisor en WhatsApp Cloud API.
-- `META_GRAPH_API_VERSION`: version de Graph API a usar, por defecto `v23.0`.
+- `META_GRAPH_API_VERSION`: version de Graph API a usar para WhatsApp, por defecto `v23.0`.
 
 Endpoints:
 
@@ -61,10 +61,11 @@ Variables en `apps/api/.env`:
 - `META_INSTAGRAM_ORGANIZATION_ID`: organizacion destino dentro del CRM.
 - `META_INSTAGRAM_ACCESS_TOKEN`: token de acceso generado en Meta.
 - `META_INSTAGRAM_BUSINESS_ACCOUNT_ID`: ID de la cuenta profesional de Instagram.
+- `META_INSTAGRAM_API_VERSION`: version de Instagram API a usar, por defecto `v25.0`.
 
 Endpoints:
 
 - `GET /api/webhooks/meta/instagram`
 - `POST /api/webhooks/meta/instagram`
 
-Si `META_INSTAGRAM_ACCESS_TOKEN` o `META_INSTAGRAM_BUSINESS_ACCOUNT_ID` no estan configurados, las respuestas outbound por Instagram se guardan en modo simulado.
+Si `META_INSTAGRAM_ACCESS_TOKEN` no esta configurado, las respuestas outbound por Instagram se guardan en modo simulado. El envio real usa `https://graph.instagram.com/{version}/me/messages`.
