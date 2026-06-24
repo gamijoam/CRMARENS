@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { canViewTeamData, scopedAssignedUserId } from "../../shared/access-policy";
 import { AuthenticatedUser } from "../../shared/authenticated-user";
+import { getConversationSlaState, SLA_BREACH_HOURS, SLA_WARNING_HOURS } from "../../shared/sla-policy";
 
 @Injectable()
 export class DashboardService {
@@ -75,7 +76,7 @@ export class DashboardService {
       }),
       this.prisma.conversation.findMany({
         where: { ...conversationWhere, status: "open" },
-        select: { channel: true },
+        select: { channel: true, createdAt: true, lastMessageAt: true },
         take: 500
       }),
       this.prisma.task.findMany({
@@ -162,6 +163,14 @@ export class DashboardService {
         return accumulator;
       }, new Map<string, number>())
     ).map(([channel, count]) => ({ channel, count }));
+    const slaSummary = openConversationRows.reduce(
+      (summary, conversation) => {
+        const state = getConversationSlaState(conversation.lastMessageAt ?? conversation.createdAt, now);
+        summary[state] += 1;
+        return summary;
+      },
+      { breached: 0, ok: 0, warning: 0 }
+    );
 
     return {
       summary: {
@@ -174,9 +183,16 @@ export class DashboardService {
         openLeads,
         openTasks,
         overdueTasks,
+        slaBreachedConversations: slaSummary.breached,
+        slaOkConversations: slaSummary.ok,
+        slaWarningConversations: slaSummary.warning,
         teamMembers,
         unassignedConversations,
-        wonLeads
+        wonLeads,
+        slaRules: {
+          breachHours: SLA_BREACH_HOURS,
+          warningHours: SLA_WARNING_HOURS
+        }
       },
       pipelineByStage,
       conversationsByChannel,

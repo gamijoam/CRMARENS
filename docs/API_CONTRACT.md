@@ -19,6 +19,7 @@ Prefijo global: `/api`
 ## Dashboard
 
 - `GET /dashboard`: devuelve metricas operativas de la organizacion activa: resumen comercial, pipeline por etapa, conversaciones por canal, tareas criticas, actividad reciente y carga por usuario. Respeta visibilidad por rol.
+- Incluye SLA de conversaciones abiertas con regla inicial: `warning` despues de 2 horas y `breached` despues de 4 horas sin actividad.
 
 ## Organizations
 
@@ -76,7 +77,7 @@ Crear pipelines y reordenar etapas requiere rol `owner` o `admin`.
 
 ## Notifications
 
-- `GET /notifications`: devuelve alertas operativas derivadas de datos reales: tareas vencidas, tareas de hoy, chats sin respuesta reciente, chats sin asignar, leads sin responsable y actividad relevante. Respeta visibilidad por rol.
+- `GET /notifications`: devuelve alertas operativas derivadas de datos reales: tareas vencidas, tareas de hoy, SLA de chats, chats sin asignar, leads sin responsable y actividad relevante. Respeta visibilidad por rol.
 
 ## Tasks
 

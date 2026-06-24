@@ -29,7 +29,8 @@ import {
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type View = "dashboard" | "inbox" | "contacts" | "leads" | "tasks" | "notes" | "team" | "channels" | "activity";
-type InboxFilter = "open" | "mine" | "unassigned" | "closed";
+type InboxFilter = "open" | "mine" | "unassigned" | "sla" | "closed";
+type SlaState = "ok" | "warning" | "breached";
 
 interface SessionUser {
   id: string;
@@ -123,6 +124,7 @@ interface Conversation {
   channel: "whatsapp" | "instagram" | "messenger";
   status: "open" | "closed";
   assignedUserId?: string | null;
+  createdAt?: string;
   lastMessageAt?: string;
   contact: Contact;
   channelConnection?: Pick<ChannelConnection, "id" | "channel" | "name" | "status">;
@@ -197,6 +199,13 @@ interface DashboardMetrics {
     openLeads: number;
     openTasks: number;
     overdueTasks: number;
+    slaBreachedConversations: number;
+    slaOkConversations: number;
+    slaRules: {
+      breachHours: number;
+      warningHours: number;
+    };
+    slaWarningConversations: number;
     teamMembers: number;
     unassignedConversations: number;
     wonLeads: number;
@@ -346,6 +355,9 @@ export function CrmApp() {
     }
     if (inboxFilter === "unassigned") {
       return conversation.status === "open" && !conversation.assignedUserId;
+    }
+    if (inboxFilter === "sla") {
+      return conversation.status === "open" && conversationSla(conversation).state !== "ok";
     }
     return conversation.status === inboxFilter;
   });
@@ -1089,6 +1101,12 @@ function DashboardView({
             <strong>{summary?.unassignedConversations ?? 0}</strong>
             <small>{summary?.openConversations ?? 0} chats abiertos</small>
           </button>
+          <button onClick={() => onOpenView("inbox")} type="button">
+            <AlertTriangle size={18} />
+            <span>SLA vencido</span>
+            <strong>{summary?.slaBreachedConversations ?? 0}</strong>
+            <small>{summary?.slaWarningConversations ?? 0} en riesgo</small>
+          </button>
           <button onClick={() => onOpenView("channels")} type="button">
             <Cable size={18} />
             <span>Canales activos</span>
@@ -1113,6 +1131,26 @@ function DashboardView({
           </p>
         </Panel>
       ) : null}
+
+      <Panel eyebrow="SLA" title="Atencion de conversaciones" className="dashboard-actions-panel">
+        <div className="sla-summary">
+          <article className="ok">
+            <span>En tiempo</span>
+            <strong>{summary?.slaOkConversations ?? 0}</strong>
+          </article>
+          <article className="warning">
+            <span>En riesgo</span>
+            <strong>{summary?.slaWarningConversations ?? 0}</strong>
+          </article>
+          <article className="breached">
+            <span>Vencidas</span>
+            <strong>{summary?.slaBreachedConversations ?? 0}</strong>
+          </article>
+        </div>
+        <p className="muted-text">
+          Riesgo despues de {summary?.slaRules.warningHours ?? 2}h y vencido despues de {summary?.slaRules.breachHours ?? 4}h sin actividad.
+        </p>
+      </Panel>
 
       <Panel eyebrow="Pipeline" title="Leads abiertos por etapa">
         <div className="dashboard-bars">
@@ -1935,6 +1973,10 @@ function ActivityView({ logs, members }: { logs: AuditLog[]; members: TeamMember
   );
 }
 
+function SlaPill({ sla }: { sla: { elapsedHours: number; label: string; state: SlaState } }) {
+  return <span className={`sla-pill ${sla.state}`}>{sla.label}</span>;
+}
+
 function AssigneeSelect({
   assignedUserId,
   members,
@@ -2007,6 +2049,7 @@ function InboxView({
     { label: "Abiertos", value: "open" },
     { label: "Mios", value: "mine" },
     { label: "Libres", value: "unassigned" },
+    { label: "SLA", value: "sla" },
     { label: "Cerrados", value: "closed" }
   ];
 
@@ -2065,6 +2108,7 @@ function InboxView({
               </span>
               <span className="conversation-meta">
                 {conversation.assignedUserId === user.id ? "Mio" : conversation.assignedUserId ? "Asignado" : "Libre"}
+                <SlaPill sla={conversationSla(conversation)} />
                 <small>{formatDate(conversation.lastMessageAt)}</small>
               </span>
             </button>
@@ -2077,6 +2121,7 @@ function InboxView({
         {selectedConversation ? (
           <div className="chat-actions">
             <span className={`status-pill ${selectedConversation.status}`}>{selectedConversation.status}</span>
+            <SlaPill sla={conversationSla(selectedConversation)} />
             <AssigneeSelect
               assignedUserId={selectedConversation.assignedUserId ?? undefined}
               members={teamMembers}
@@ -2198,6 +2243,34 @@ function formatMoney(value: number) {
     maximumFractionDigits: 0,
     style: "currency"
   }).format(value);
+}
+
+function conversationSla(conversation: Conversation) {
+  if (conversation.status !== "open") {
+    return { elapsedHours: 0, label: "Cerrado", state: "ok" as SlaState };
+  }
+
+  const referenceValue = conversation.lastMessageAt ?? conversation.createdAt;
+  if (!referenceValue) {
+    return { elapsedHours: 0, label: "Sin reloj", state: "ok" as SlaState };
+  }
+
+  const elapsedHours = Math.max(0, (Date.now() - new Date(referenceValue).getTime()) / (1000 * 60 * 60));
+  if (elapsedHours >= 4) {
+    return { elapsedHours, label: `SLA vencido ${formatHours(elapsedHours)}`, state: "breached" as SlaState };
+  }
+  if (elapsedHours >= 2) {
+    return { elapsedHours, label: `SLA riesgo ${formatHours(elapsedHours)}`, state: "warning" as SlaState };
+  }
+  return { elapsedHours, label: `SLA ok ${formatHours(elapsedHours)}`, state: "ok" as SlaState };
+}
+
+function formatHours(value: number) {
+  if (value < 1) {
+    return `${Math.floor(value * 60)}m`;
+  }
+
+  return `${Math.floor(value)}h`;
 }
 
 function roleLabel(role?: string) {

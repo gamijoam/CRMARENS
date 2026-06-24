@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { canViewTeamData, scopedAssignedUserId } from "../../shared/access-policy";
 import { AuthenticatedUser } from "../../shared/authenticated-user";
 import { PrismaService } from "../../prisma/prisma.service";
+import { getConversationSlaState, SLA_WARNING_HOURS } from "../../shared/sla-policy";
 
 type NotificationPriority = "urgent" | "attention" | "info";
 
@@ -27,8 +28,8 @@ export class NotificationsService {
     startOfToday.setHours(0, 0, 0, 0);
     const endOfToday = new Date(now);
     endOfToday.setHours(23, 59, 59, 999);
-    const staleThreshold = new Date(now);
-    staleThreshold.setHours(staleThreshold.getHours() - 4);
+    const warningThreshold = new Date(now);
+    warningThreshold.setHours(warningThreshold.getHours() - SLA_WARNING_HOURS);
 
     const assignedUserId = scopedAssignedUserId(user);
     const taskWhere: Prisma.TaskWhereInput = {
@@ -47,7 +48,7 @@ export class NotificationsService {
     const [
       overdueTasks,
       dueTodayTasks,
-      staleConversations,
+      slaConversations,
       unassignedConversations,
       unassignedLeads,
       recentActivity
@@ -65,11 +66,14 @@ export class NotificationsService {
         where: {
           ...conversationWhere,
           status: "open",
-          OR: [{ lastMessageAt: { lt: staleThreshold } }, { lastMessageAt: null }]
+          OR: [
+            { lastMessageAt: { lte: warningThreshold } },
+            { lastMessageAt: null, createdAt: { lte: warningThreshold } }
+          ]
         },
         orderBy: [{ lastMessageAt: "asc" }, { createdAt: "asc" }],
-        select: { id: true, contact: { select: { fullName: true } } },
-        take: 5
+        select: { createdAt: true, id: true, lastMessageAt: true, contact: { select: { fullName: true } } },
+        take: 10
       }),
       canViewTeamData(user)
         ? this.prisma.conversation.count({ where: { organizationId, status: "open", assignedUserId: null } })
@@ -112,16 +116,25 @@ export class NotificationsService {
       });
     }
 
-    if (staleConversations.length) {
+    const breachedConversations = slaConversations.filter(
+      (conversation) => getConversationSlaState(conversation.lastMessageAt ?? conversation.createdAt, now) === "breached"
+    );
+    const warningConversations = slaConversations.filter(
+      (conversation) => getConversationSlaState(conversation.lastMessageAt ?? conversation.createdAt, now) === "warning"
+    );
+    const primarySlaConversation = breachedConversations[0] ?? warningConversations[0];
+
+    if (primarySlaConversation) {
+      const isBreached = breachedConversations.length > 0;
       notifications.push({
-        body: `${staleConversations[0].contact.fullName} requiere seguimiento`,
-        count: staleConversations.length,
-        entityId: staleConversations[0].id,
+        body: `${primarySlaConversation.contact.fullName} requiere seguimiento`,
+        count: isBreached ? breachedConversations.length : warningConversations.length,
+        entityId: primarySlaConversation.id,
         entityType: "conversation",
-        id: "conversations-stale",
-        priority: "urgent",
+        id: isBreached ? "conversations-sla-breached" : "conversations-sla-warning",
+        priority: isBreached ? "urgent" : "attention",
         targetView: "inbox",
-        title: staleConversations.length === 1 ? "Chat sin respuesta reciente" : "Chats sin respuesta reciente"
+        title: isBreached ? "SLA vencido en chats" : "SLA en riesgo en chats"
       });
     }
 
