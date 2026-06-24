@@ -15,9 +15,6 @@ export class CreateUserDto {
   @MinLength(8)
   password!: string;
 
-  @IsString()
-  organizationId!: string;
-
   @IsIn(organizationRoles)
   role!: OrganizationRole;
 }

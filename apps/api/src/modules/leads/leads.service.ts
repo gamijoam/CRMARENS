@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
+import { AssignLeadDto } from "./dto/assign-lead.dto";
 import { CreateLeadDto } from "./dto/create-lead.dto";
 import { ListLeadsQueryDto } from "./dto/list-leads-query.dto";
 import { MoveLeadStageDto } from "./dto/move-lead-stage.dto";
@@ -85,6 +86,19 @@ export class LeadsService {
     return this.prisma.lead.update({
       where: { id },
       data: { status: dto.status },
+      include: this.leadInclude()
+    });
+  }
+
+  async assign(organizationId: string, id: string, dto: AssignLeadDto) {
+    await this.findOne(organizationId, id);
+    if (dto.assignedUserId) {
+      await this.ensureOrganizationUserExists(organizationId, dto.assignedUserId);
+    }
+
+    return this.prisma.lead.update({
+      where: { id },
+      data: { assignedUserId: dto.assignedUserId ?? null },
       include: this.leadInclude()
     });
   }

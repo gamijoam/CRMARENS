@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
+import { AssignTaskDto } from "./dto/assign-task.dto";
 import { CreateTaskDto } from "./dto/create-task.dto";
 import { ListTasksQueryDto } from "./dto/list-tasks-query.dto";
 import { UpdateTaskStatusDto } from "./dto/update-task-status.dto";
@@ -85,6 +86,19 @@ export class TasksService {
     return this.prisma.task.update({
       where: { id },
       data: { status: dto.status },
+      include: this.taskInclude()
+    });
+  }
+
+  async assign(organizationId: string, id: string, dto: AssignTaskDto) {
+    await this.findOne(organizationId, id);
+    if (dto.assignedUserId) {
+      await this.ensureOrganizationUserExists(organizationId, dto.assignedUserId);
+    }
+
+    return this.prisma.task.update({
+      where: { id },
+      data: { assignedUserId: dto.assignedUserId ?? null },
       include: this.taskInclude()
     });
   }

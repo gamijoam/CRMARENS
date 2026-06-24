@@ -441,7 +441,9 @@ textarea:focus {
 .row-actions {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  justify-content: flex-end;
 }
 
 .row-actions small {
@@ -459,6 +461,13 @@ textarea:focus {
   border-radius: 8px;
   min-height: 36px;
   padding: 0 10px;
+}
+
+.compact-select {
+  min-height: 36px;
+  min-width: 150px;
+  padding: 7px 9px;
+  width: auto;
 }
 
 .pipeline-list {

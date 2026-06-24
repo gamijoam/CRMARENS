@@ -12,14 +12,16 @@ import {
   MessageSquareText,
   Plus,
   Send,
+  ShieldCheck,
   StickyNote,
   UserCheck,
   UserMinus,
+  UserPlus,
   UsersRound
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-type View = "inbox" | "contacts" | "leads" | "tasks" | "notes";
+type View = "inbox" | "contacts" | "leads" | "tasks" | "notes" | "team";
 type InboxFilter = "open" | "mine" | "unassigned" | "closed";
 
 interface SessionUser {
@@ -67,6 +69,7 @@ interface Lead {
   contact: Contact;
   pipeline: Pipeline;
   stage: PipelineStage;
+  assignee?: TeamMember;
 }
 
 interface Task {
@@ -77,6 +80,7 @@ interface Task {
   dueAt?: string;
   contact?: Contact;
   lead?: Lead;
+  assignee?: TeamMember;
 }
 
 interface Note {
@@ -95,6 +99,7 @@ interface Conversation {
   assignedUserId?: string | null;
   lastMessageAt?: string;
   contact: Contact;
+  assignee?: TeamMember;
   messages?: Message[];
 }
 
@@ -108,6 +113,17 @@ interface Message {
   createdAt: string;
 }
 
+interface TeamMember {
+  id: string;
+  name: string;
+  email: string;
+  status: string;
+  organizations: Array<{
+    role: "owner" | "admin" | "supervisor" | "seller";
+    isActive: boolean;
+  }>;
+}
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 
 const navItems: Array<{ id: View; label: string; icon: typeof Inbox }> = [
@@ -115,7 +131,8 @@ const navItems: Array<{ id: View; label: string; icon: typeof Inbox }> = [
   { id: "contacts", label: "Contactos", icon: UsersRound },
   { id: "leads", label: "Leads", icon: BarChart3 },
   { id: "tasks", label: "Tareas", icon: ClipboardList },
-  { id: "notes", label: "Notas", icon: StickyNote }
+  { id: "notes", label: "Notas", icon: StickyNote },
+  { id: "team", label: "Equipo", icon: ShieldCheck }
 ];
 
 export function CrmApp() {
@@ -130,6 +147,7 @@ export function CrmApp() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [inboxFilter, setInboxFilter] = useState<InboxFilter>("open");
@@ -221,14 +239,15 @@ export function CrmApp() {
   async function refreshData(activeToken = token) {
     setLoading(true);
     try {
-      const [nextContacts, nextPipelines, nextLeads, nextTasks, nextNotes, nextConversations] =
+      const [nextContacts, nextPipelines, nextLeads, nextTasks, nextNotes, nextConversations, nextTeamMembers] =
         await Promise.all([
           api<Contact[]>("/contacts", { token: activeToken }),
           api<Pipeline[]>("/pipelines", { token: activeToken }),
           api<Lead[]>("/leads", { token: activeToken }),
           api<Task[]>("/tasks", { token: activeToken }),
           api<Note[]>("/notes", { token: activeToken }),
-          api<Conversation[]>("/conversations", { token: activeToken })
+          api<Conversation[]>("/conversations", { token: activeToken }),
+          api<TeamMember[]>("/users", { token: activeToken })
         ]);
 
       setContacts(nextContacts);
@@ -237,6 +256,7 @@ export function CrmApp() {
       setTasks(nextTasks);
       setNotes(nextNotes);
       setConversations(nextConversations);
+      setTeamMembers(nextTeamMembers);
       if (!selectedConversationId && nextConversations[0]) {
         setSelectedConversationId(nextConversations[0].id);
       }
@@ -301,7 +321,8 @@ export function CrmApp() {
       contactId: form.get("contactId"),
       pipelineId: form.get("pipelineId"),
       value: Number(form.get("value") || 0),
-      currency: "USD"
+      currency: "USD",
+      assignedUserId: form.get("assignedUserId") || undefined
     });
     event.currentTarget.reset();
   }
@@ -314,7 +335,19 @@ export function CrmApp() {
       contactId: form.get("contactId") || undefined,
       title: form.get("title"),
       dueAt: form.get("dueAt") ? new Date(String(form.get("dueAt"))).toISOString() : undefined,
-      assignedUserId: user?.id
+      assignedUserId: form.get("assignedUserId") || user?.id
+    });
+    event.currentTarget.reset();
+  }
+
+  async function submitTeamMember(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await mutate("/users", {
+      name: form.get("name"),
+      email: form.get("email"),
+      password: form.get("password"),
+      role: form.get("role")
     });
     event.currentTarget.reset();
   }
@@ -409,6 +442,18 @@ export function CrmApp() {
 
   async function unassignConversation(conversationId: string) {
     await mutate(`/conversations/${conversationId}/assign`, {}, "PATCH");
+  }
+
+  async function assignConversation(conversationId: string, assignedUserId: string) {
+    await mutate(`/conversations/${conversationId}/assign`, assignedUserId ? { assignedUserId } : {}, "PATCH");
+  }
+
+  async function assignLead(leadId: string, assignedUserId: string) {
+    await mutate(`/leads/${leadId}/assign`, assignedUserId ? { assignedUserId } : {}, "PATCH");
+  }
+
+  async function assignTask(taskId: string, assignedUserId: string) {
+    await mutate(`/tasks/${taskId}/assign`, assignedUserId ? { assignedUserId } : {}, "PATCH");
   }
 
   if (!token || !user) {
@@ -506,13 +551,23 @@ export function CrmApp() {
             leads={leads}
             pipelineCounts={pipelineCounts}
             pipelines={pipelines}
+            teamMembers={teamMembers}
+            onAssign={assignLead}
             onSubmit={submitLead}
             onWin={winLead}
           />
         ) : null}
 
         {view === "tasks" ? (
-          <TasksView contacts={contacts} leads={leads} tasks={tasks} onComplete={completeTask} onSubmit={submitTask} />
+          <TasksView
+            contacts={contacts}
+            leads={leads}
+            tasks={tasks}
+            teamMembers={teamMembers}
+            onAssign={assignTask}
+            onComplete={completeTask}
+            onSubmit={submitTask}
+          />
         ) : null}
 
         {view === "notes" ? (
@@ -530,7 +585,9 @@ export function CrmApp() {
             selectedConversation={selectedConversation}
             selectedConversationId={selectedConversationId}
             tasks={selectedContactTasks}
+            teamMembers={teamMembers}
             user={user}
+            onAssign={assignConversation}
             onAssignToMe={assignConversationToMe}
             onClose={closeConversation}
             onFilterChange={setInboxFilter}
@@ -540,6 +597,10 @@ export function CrmApp() {
             onSubmitMessage={submitMessage}
             onUnassign={unassignConversation}
           />
+        ) : null}
+
+        {view === "team" ? (
+          <TeamView currentUser={user} members={teamMembers} onSubmit={submitTeamMember} />
         ) : null}
       </section>
     </main>
@@ -552,7 +613,8 @@ function titleForView(view: View) {
     contacts: "Contactos",
     leads: "Leads y pipeline",
     tasks: "Tareas",
-    notes: "Notas internas"
+    notes: "Notas internas",
+    team: "Equipo y permisos"
   };
   return titles[view];
 }
@@ -600,6 +662,8 @@ function LeadsView({
   leads,
   pipelineCounts,
   pipelines,
+  teamMembers,
+  onAssign,
   onSubmit,
   onWin
 }: {
@@ -607,6 +671,8 @@ function LeadsView({
   leads: Lead[];
   pipelineCounts: Map<string, number>;
   pipelines: Pipeline[];
+  teamMembers: TeamMember[];
+  onAssign: (leadId: string, assignedUserId: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onWin: (leadId: string) => void;
 }) {
@@ -627,6 +693,12 @@ function LeadsView({
             ))}
           </select>
           <input name="value" min="0" placeholder="Valor estimado" type="number" />
+          <select name="assignedUserId">
+            <option value="">Responsable</option>
+            {teamMembers.map((member) => (
+              <option key={member.id} value={member.id}>{member.name}</option>
+            ))}
+          </select>
           <button className="primary-button"><Plus size={17} /> Crear lead</button>
         </form>
       </Panel>
@@ -649,7 +721,16 @@ function LeadsView({
         <DataList items={leads} empty="Sin leads">
           {(lead) => (
             <Row
-              action={lead.status === "open" ? <button onClick={() => void onWin(lead.id)}>Ganar</button> : undefined}
+              action={
+                <>
+                  <AssigneeSelect
+                    assignedUserId={lead.assignee?.id}
+                    members={teamMembers}
+                    onChange={(assignedUserId) => void onAssign(lead.id, assignedUserId)}
+                  />
+                  {lead.status === "open" ? <button onClick={() => void onWin(lead.id)}>Ganar</button> : null}
+                </>
+              }
               badge={lead.status}
               key={lead.id}
               meta={`${lead.pipeline.name} · ${lead.stage.name} · ${lead.currency} ${lead.value ?? 0}`}
@@ -666,12 +747,16 @@ function TasksView({
   contacts,
   leads,
   tasks,
+  teamMembers,
+  onAssign,
   onComplete,
   onSubmit
 }: {
   contacts: Contact[];
   leads: Lead[];
   tasks: Task[];
+  teamMembers: TeamMember[];
+  onAssign: (taskId: string, assignedUserId: string) => void;
   onComplete: (taskId: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
@@ -693,6 +778,12 @@ function TasksView({
             ))}
           </select>
           <input name="dueAt" type="datetime-local" />
+          <select name="assignedUserId">
+            <option value="">Responsable</option>
+            {teamMembers.map((member) => (
+              <option key={member.id} value={member.id}>{member.name}</option>
+            ))}
+          </select>
           <button className="primary-button"><Plus size={17} /> Crear tarea</button>
         </form>
       </Panel>
@@ -700,7 +791,16 @@ function TasksView({
         <DataList items={tasks} empty="Sin tareas">
           {(task) => (
             <Row
-              action={task.status === "open" ? <button onClick={() => void onComplete(task.id)}>Completar</button> : undefined}
+              action={
+                <>
+                  <AssigneeSelect
+                    assignedUserId={task.assignee?.id}
+                    members={teamMembers}
+                    onChange={(assignedUserId) => void onAssign(task.id, assignedUserId)}
+                  />
+                  {task.status === "open" ? <button onClick={() => void onComplete(task.id)}>Completar</button> : null}
+                </>
+              }
               badge={task.status}
               key={task.id}
               meta={task.lead?.contact.fullName ?? task.contact?.fullName ?? "Sin asociado"}
@@ -759,6 +859,80 @@ function NotesView({
   );
 }
 
+function TeamView({
+  currentUser,
+  members,
+  onSubmit
+}: {
+  currentUser: SessionUser;
+  members: TeamMember[];
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const canCreate = ["owner", "admin"].includes(currentUser.role);
+
+  return (
+    <section className="content-grid">
+      <Panel title="Nuevo miembro" eyebrow="Permisos">
+        {canCreate ? (
+          <form className="stack-form" onSubmit={onSubmit}>
+            <input name="name" placeholder="Nombre" required />
+            <input name="email" placeholder="Email" required type="email" />
+            <input name="password" minLength={8} placeholder="Password temporal" required type="password" />
+            <select name="role" required>
+              <option value="seller">Vendedor</option>
+              <option value="supervisor">Supervisor</option>
+              <option value="admin">Admin</option>
+              <option value="owner">Owner</option>
+            </select>
+            <button className="primary-button"><UserPlus size={17} /> Crear usuario</button>
+          </form>
+        ) : (
+          <p className="muted-text">Tu rol actual puede ver el equipo, pero no crear usuarios.</p>
+        )}
+      </Panel>
+
+      <Panel title="Miembros activos" eyebrow="Organizacion">
+        <DataList items={members} empty="Sin usuarios">
+          {(member) => {
+            const membership = member.organizations[0];
+            return (
+              <Row
+                badge={roleLabel(membership?.role)}
+                key={member.id}
+                meta={`${member.email} / ${member.status}`}
+                title={member.name}
+              />
+            );
+          }}
+        </DataList>
+      </Panel>
+    </section>
+  );
+}
+
+function AssigneeSelect({
+  assignedUserId,
+  members,
+  onChange
+}: {
+  assignedUserId?: string;
+  members: TeamMember[];
+  onChange: (assignedUserId: string) => void;
+}) {
+  return (
+    <select
+      className="compact-select"
+      onChange={(event) => onChange(event.currentTarget.value)}
+      value={assignedUserId ?? ""}
+    >
+      <option value="">Sin responsable</option>
+      {members.map((member) => (
+        <option key={member.id} value={member.id}>{member.name}</option>
+      ))}
+    </select>
+  );
+}
+
 function InboxView({
   contacts,
   conversations,
@@ -769,7 +943,9 @@ function InboxView({
   selectedConversation,
   selectedConversationId,
   tasks,
+  teamMembers,
   user,
+  onAssign,
   onAssignToMe,
   onClose,
   onFilterChange,
@@ -788,7 +964,9 @@ function InboxView({
   selectedConversation?: Conversation;
   selectedConversationId: string;
   tasks: Task[];
+  teamMembers: TeamMember[];
   user: SessionUser;
+  onAssign: (conversationId: string, assignedUserId: string) => void;
   onAssignToMe: (conversationId: string) => void;
   onClose: (conversationId: string) => void;
   onFilterChange: (filter: InboxFilter) => void;
@@ -864,6 +1042,11 @@ function InboxView({
         {selectedConversation ? (
           <div className="chat-actions">
             <span className={`status-pill ${selectedConversation.status}`}>{selectedConversation.status}</span>
+            <AssigneeSelect
+              assignedUserId={selectedConversation.assignedUserId ?? undefined}
+              members={teamMembers}
+              onChange={(assignedUserId) => void onAssign(selectedConversation.id, assignedUserId)}
+            />
             {selectedConversation.assignedUserId === user.id ? (
               <button className="secondary-button" onClick={() => void onUnassign(selectedConversation.id)} type="button">
                 <UserMinus size={16} /> Liberar
@@ -972,6 +1155,16 @@ function formatDate(value?: string) {
     minute: "2-digit",
     month: "short"
   }).format(new Date(value));
+}
+
+function roleLabel(role?: string) {
+  const labels: Record<string, string> = {
+    admin: "Admin",
+    owner: "Owner",
+    seller: "Vendedor",
+    supervisor: "Supervisor"
+  };
+  return role ? labels[role] ?? role : "Sin rol";
 }
 
 function Panel({

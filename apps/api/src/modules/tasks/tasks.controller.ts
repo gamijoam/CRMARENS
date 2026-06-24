@@ -3,6 +3,7 @@ import { AuthenticatedUser } from "../../shared/authenticated-user";
 import { CurrentUser } from "../../shared/current-user.decorator";
 import { JwtAuthGuard } from "../../shared/jwt-auth.guard";
 import { requireOrganization } from "../../shared/require-organization";
+import { AssignTaskDto } from "./dto/assign-task.dto";
 import { CreateTaskDto } from "./dto/create-task.dto";
 import { ListTasksQueryDto } from "./dto/list-tasks-query.dto";
 import { UpdateTaskStatusDto } from "./dto/update-task-status.dto";
@@ -45,5 +46,14 @@ export class TasksController {
     @Body() dto: UpdateTaskStatusDto
   ) {
     return this.tasksService.updateStatus(requireOrganization(user), id, dto);
+  }
+
+  @Patch(":id/assign")
+  assign(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Body() dto: AssignTaskDto
+  ) {
+    return this.tasksService.assign(requireOrganization(user), id, dto);
   }
 }

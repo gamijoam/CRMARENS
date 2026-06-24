@@ -3,6 +3,7 @@ import { AuthenticatedUser } from "../../shared/authenticated-user";
 import { CurrentUser } from "../../shared/current-user.decorator";
 import { JwtAuthGuard } from "../../shared/jwt-auth.guard";
 import { requireOrganization } from "../../shared/require-organization";
+import { AssignLeadDto } from "./dto/assign-lead.dto";
 import { CreateLeadDto } from "./dto/create-lead.dto";
 import { ListLeadsQueryDto } from "./dto/list-leads-query.dto";
 import { MoveLeadStageDto } from "./dto/move-lead-stage.dto";
@@ -45,5 +46,14 @@ export class LeadsController {
     @Body() dto: UpdateLeadStatusDto
   ) {
     return this.leadsService.updateStatus(requireOrganization(user), id, dto);
+  }
+
+  @Patch(":id/assign")
+  assign(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Body() dto: AssignLeadDto
+  ) {
+    return this.leadsService.assign(requireOrganization(user), id, dto);
   }
 }

@@ -15,8 +15,9 @@ Prefijo global: `/api`
 
 ## Users
 
-- `POST /users`: crea usuario y lo vincula a una organizacion.
-- `GET /users/:id`: obtiene usuario.
+- `POST /users`: crea usuario y lo vincula a la organizacion activa. Requiere rol `owner` o `admin`.
+- `GET /users`: lista miembros activos de la organizacion activa.
+- `GET /users/:id`: obtiene usuario si pertenece a la organizacion activa.
 
 ## Contacts
 
@@ -38,6 +39,7 @@ Prefijo global: `/api`
 - `POST /leads`: crea oportunidad asociada a un contacto.
 - `GET /leads`: lista leads. Acepta `pipelineId`, `stageId` y `status`.
 - `GET /leads/:id`: obtiene lead con contacto, pipeline, etapa y vendedor asignado.
+- `PATCH /leads/:id/assign`: asigna o libera responsable.
 - `PATCH /leads/:id/stage`: mueve lead a otra etapa del mismo pipeline.
 - `PATCH /leads/:id/status`: cambia estado entre `open`, `won` y `lost`.
 
@@ -55,6 +57,7 @@ Prefijo global: `/api`
 - `GET /tasks`: lista tareas. Acepta `contactId`, `leadId`, `assignedUserId` y `status`.
 - `GET /tasks/:id`: obtiene tarea.
 - `PATCH /tasks/:id`: actualiza titulo, descripcion, vencimiento o asignacion.
+- `PATCH /tasks/:id/assign`: asigna o libera responsable.
 - `PATCH /tasks/:id/status`: cambia estado entre `open`, `done` y `canceled`.
 
 ## Conversations
