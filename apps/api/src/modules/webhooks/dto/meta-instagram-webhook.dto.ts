@@ -35,10 +35,24 @@ class MetaInstagramMessagingDto {
   timestamp?: number;
 }
 
+class MetaInstagramChangeDto {
+  @IsOptional()
+  @IsString()
+  field?: string;
+
+  @IsObject()
+  @IsOptional()
+  value?: Record<string, unknown>;
+}
+
 class MetaInstagramEntryDto {
   @IsOptional()
   @IsString()
   id?: string;
+
+  @IsArray()
+  @IsOptional()
+  changes?: MetaInstagramChangeDto[];
 
   @IsArray()
   @IsOptional()
@@ -55,5 +69,13 @@ export class MetaInstagramWebhookDto {
 
   @IsOptional()
   @IsString()
+  field?: string;
+
+  @IsOptional()
+  @IsString()
   object?: string;
+
+  @IsObject()
+  @IsOptional()
+  value?: Record<string, unknown>;
 }

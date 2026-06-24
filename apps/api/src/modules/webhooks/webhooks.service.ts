@@ -27,7 +27,7 @@ interface IncomingInstagramMessage {
   externalMessageId: string;
   from: string;
   text?: string;
-  timestamp?: number;
+  timestamp?: number | string;
 }
 
 @Injectable()
@@ -197,7 +197,25 @@ export class WebhooksService {
   private extractInstagramMessages(dto: MetaInstagramWebhookDto) {
     const messages: IncomingInstagramMessage[] = [];
 
+    if (dto.field === "messages" && dto.value) {
+      const message = this.extractInstagramMessageValue(dto.value);
+      if (message) {
+        messages.push(message);
+      }
+    }
+
     for (const entry of dto.entry ?? []) {
+      for (const change of entry.changes ?? []) {
+        if (change.field !== "messages" || !change.value) {
+          continue;
+        }
+
+        const message = this.extractInstagramMessageValue(change.value);
+        if (message) {
+          messages.push(message);
+        }
+      }
+
       for (const event of entry.messaging ?? []) {
         if (!event.sender?.id || !event.message?.mid) {
           continue;
@@ -213,6 +231,28 @@ export class WebhooksService {
     }
 
     return messages;
+  }
+
+  private extractInstagramMessageValue(value: Record<string, unknown>) {
+    const sender = this.asRecord(value.sender);
+    const message = this.asRecord(value.message);
+    const senderId = typeof sender?.id === "string" ? sender.id : undefined;
+    const externalMessageId = typeof message?.mid === "string" ? message.mid : undefined;
+
+    if (!senderId || !externalMessageId || !message) {
+      return undefined;
+    }
+
+    return {
+      externalMessageId,
+      from: senderId,
+      text: typeof message.text === "string" ? message.text : undefined,
+      timestamp: typeof value.timestamp === "number" || typeof value.timestamp === "string" ? value.timestamp : undefined
+    };
+  }
+
+  private asRecord(value: unknown) {
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
   }
 
   private async persistStatusUpdate(
@@ -342,7 +382,7 @@ export class WebhooksService {
     message: IncomingInstagramMessage,
     rawPayload: MetaInstagramWebhookDto
   ) {
-    const createdAt = message.timestamp ? new Date(message.timestamp) : new Date();
+    const createdAt = this.parseInstagramTimestamp(message.timestamp);
     const contact = await this.findOrCreateInstagramContact(organizationId, message);
     const conversation = await this.findOrCreateChannelConversation(
       organizationId,
@@ -394,6 +434,19 @@ export class WebhooksService {
     });
 
     return savedMessage;
+  }
+
+  private parseInstagramTimestamp(timestamp: number | string | undefined) {
+    if (timestamp === undefined) {
+      return new Date();
+    }
+
+    const value = typeof timestamp === "string" ? Number(timestamp) : timestamp;
+    if (!Number.isFinite(value)) {
+      return new Date();
+    }
+
+    return new Date(value < 10_000_000_000 ? value * 1000 : value);
   }
 
   private async findOrCreateContact(organizationId: string, message: IncomingWhatsappMessage) {
