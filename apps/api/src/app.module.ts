@@ -9,6 +9,7 @@ import { MessagesModule } from "./modules/messages/messages.module";
 import { NotesModule } from "./modules/notes/notes.module";
 import { OrganizationsModule } from "./modules/organizations/organizations.module";
 import { PipelinesModule } from "./modules/pipelines/pipelines.module";
+import { SearchModule } from "./modules/search/search.module";
 import { TasksModule } from "./modules/tasks/tasks.module";
 import { UsersModule } from "./modules/users/users.module";
 import { PrismaModule } from "./prisma/prisma.module";
@@ -27,7 +28,8 @@ import { PrismaModule } from "./prisma/prisma.module";
     NotesModule,
     TasksModule,
     ConversationsModule,
-    MessagesModule
+    MessagesModule,
+    SearchModule
   ]
 })
 export class AppModule {}

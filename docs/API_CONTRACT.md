@@ -82,6 +82,10 @@ Prefijo global: `/api`
 - `GET /conversations/:conversationId/messages`: lista mensajes de una conversacion.
 - `PATCH /conversations/:conversationId/messages/:messageId/status`: actualiza estado del mensaje.
 
+## Search
+
+- `GET /search?q=`: busqueda global en la organizacion activa. Devuelve contactos, leads, tareas, notas y conversaciones. Acepta `status`, `assignedUserId` y `channel`.
+
 ## Futuro
 
 - `POST /webhooks/meta/whatsapp`

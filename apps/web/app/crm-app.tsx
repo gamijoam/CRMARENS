@@ -14,6 +14,7 @@ import {
   Plus,
   Send,
   ShieldCheck,
+  Search,
   StickyNote,
   UserCheck,
   UserMinus,
@@ -156,6 +157,15 @@ interface ChannelConnection {
   };
 }
 
+interface GlobalSearchResults {
+  contacts: Contact[];
+  leads: Lead[];
+  tasks: Task[];
+  notes: Note[];
+  conversations: Conversation[];
+  total: number;
+}
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 
 const navItems: Array<{ id: View; label: string; icon: typeof Inbox }> = [
@@ -185,6 +195,12 @@ export function CrmApp() {
   const [selectedConversationId, setSelectedConversationId] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [inboxFilter, setInboxFilter] = useState<InboxFilter>("open");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchStatus, setSearchStatus] = useState("");
+  const [searchAssigneeId, setSearchAssigneeId] = useState("");
+  const [searchChannel, setSearchChannel] = useState("");
+  const [searchResults, setSearchResults] = useState<GlobalSearchResults | null>(null);
+  const [searching, setSearching] = useState(false);
 
   useEffect(() => {
     const storedToken = window.localStorage.getItem("crm_token");
@@ -211,6 +227,19 @@ export function CrmApp() {
 
     void api<Message[]>(`/conversations/${selectedConversationId}/messages`, { token }).then(setMessages);
   }, [selectedConversationId, token]);
+
+  useEffect(() => {
+    if (!token || searchQuery.trim().length < 2) {
+      setSearchResults(null);
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      void runGlobalSearch();
+    }, 300);
+
+    return () => window.clearTimeout(timeout);
+  }, [searchQuery, searchStatus, searchAssigneeId, searchChannel, token]);
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationId);
   const openLeads = leads.filter((lead) => lead.status === "open");
@@ -310,6 +339,42 @@ export function CrmApp() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function runGlobalSearch() {
+    const query = searchQuery.trim();
+    if (query.length < 2) {
+      setSearchResults(null);
+      return;
+    }
+
+    setSearching(true);
+    try {
+      const params = new URLSearchParams({ q: query });
+      if (searchStatus) {
+        params.set("status", searchStatus);
+      }
+      if (searchAssigneeId) {
+        params.set("assignedUserId", searchAssigneeId);
+      }
+      if (searchChannel) {
+        params.set("channel", searchChannel);
+      }
+      const result = await api<GlobalSearchResults>(`/search?${params.toString()}`, { token });
+      setSearchResults(result);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo buscar");
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function openSearchResult(viewTarget: View, conversationId?: string) {
+    setView(viewTarget);
+    if (conversationId) {
+      setSelectedConversationId(conversationId);
+    }
+    setSearchResults(null);
   }
 
   async function login(event: FormEvent<HTMLFormElement>) {
@@ -612,10 +677,26 @@ export function CrmApp() {
             <p className="eyebrow">MVP conectado</p>
             <h1>{titleForView(view)}</h1>
           </div>
-          <button className="secondary-button" onClick={() => void refreshData()} type="button">
-            {loading ? <Loader2 className="spin" size={18} /> : <CircleDot size={18} />}
-            Actualizar
-          </button>
+          <div className="topbar-tools">
+            <GlobalSearch
+              assigneeId={searchAssigneeId}
+              channel={searchChannel}
+              members={teamMembers}
+              query={searchQuery}
+              results={searchResults}
+              searching={searching}
+              status={searchStatus}
+              onAssigneeChange={setSearchAssigneeId}
+              onChannelChange={setSearchChannel}
+              onOpenResult={openSearchResult}
+              onQueryChange={setSearchQuery}
+              onStatusChange={setSearchStatus}
+            />
+            <button className="secondary-button" onClick={() => void refreshData()} type="button">
+              {loading ? <Loader2 className="spin" size={18} /> : <CircleDot size={18} />}
+              Actualizar
+            </button>
+          </div>
         </header>
 
         {notice ? <p className="status-banner">{notice}</p> : null}
@@ -723,6 +804,152 @@ function Metric({ label, value, detail }: { label: string; value: number; detail
       <strong>{value}</strong>
       <small>{detail}</small>
     </article>
+  );
+}
+
+function GlobalSearch({
+  assigneeId,
+  channel,
+  members,
+  query,
+  results,
+  searching,
+  status,
+  onAssigneeChange,
+  onChannelChange,
+  onOpenResult,
+  onQueryChange,
+  onStatusChange
+}: {
+  assigneeId: string;
+  channel: string;
+  members: TeamMember[];
+  query: string;
+  results: GlobalSearchResults | null;
+  searching: boolean;
+  status: string;
+  onAssigneeChange: (value: string) => void;
+  onChannelChange: (value: string) => void;
+  onOpenResult: (view: View, conversationId?: string) => void;
+  onQueryChange: (value: string) => void;
+  onStatusChange: (value: string) => void;
+}) {
+  const hasResults = Boolean(results && results.total > 0);
+
+  return (
+    <div className="global-search">
+      <label className="search-box">
+        <Search size={17} />
+        <input
+          aria-label="Buscar en CRM"
+          onChange={(event) => onQueryChange(event.currentTarget.value)}
+          placeholder="Buscar contactos, chats, tareas..."
+          value={query}
+        />
+        {searching ? <Loader2 className="spin" size={16} /> : null}
+      </label>
+      <div className="search-filters">
+        <select aria-label="Estado" onChange={(event) => onStatusChange(event.currentTarget.value)} value={status}>
+          <option value="">Estado</option>
+          <option value="open">Abierto</option>
+          <option value="closed">Cerrado</option>
+          <option value="done">Completado</option>
+          <option value="won">Ganado</option>
+          <option value="lost">Perdido</option>
+        </select>
+        <select aria-label="Responsable" onChange={(event) => onAssigneeChange(event.currentTarget.value)} value={assigneeId}>
+          <option value="">Responsable</option>
+          {members.map((member) => (
+            <option key={member.id} value={member.id}>{member.name}</option>
+          ))}
+        </select>
+        <select aria-label="Canal" onChange={(event) => onChannelChange(event.currentTarget.value)} value={channel}>
+          <option value="">Canal</option>
+          <option value="whatsapp">WhatsApp</option>
+          <option value="instagram">Instagram</option>
+          <option value="messenger">Messenger</option>
+        </select>
+      </div>
+      {results ? (
+        <div className="search-results">
+          {hasResults ? (
+            <>
+              <SearchGroup title="Contactos" view="contacts" items={results.contacts} onOpenResult={onOpenResult}>
+                {(contact) => ({
+                  key: contact.id,
+                  title: contact.fullName,
+                  meta: [contact.phone, contact.email].filter(Boolean).join(" / ")
+                })}
+              </SearchGroup>
+              <SearchGroup title="Leads" view="leads" items={results.leads} onOpenResult={onOpenResult}>
+                {(lead) => ({
+                  key: lead.id,
+                  title: lead.contact.fullName,
+                  meta: `${lead.pipeline.name} / ${lead.stage.name} / ${lead.status}`
+                })}
+              </SearchGroup>
+              <SearchGroup title="Tareas" view="tasks" items={results.tasks} onOpenResult={onOpenResult}>
+                {(task) => ({
+                  key: task.id,
+                  title: task.title,
+                  meta: task.lead?.contact.fullName ?? task.contact?.fullName ?? task.status
+                })}
+              </SearchGroup>
+              <SearchGroup title="Notas" view="notes" items={results.notes} onOpenResult={onOpenResult}>
+                {(note) => ({
+                  key: note.id,
+                  title: note.body,
+                  meta: note.lead?.contact.fullName ?? note.contact?.fullName ?? "Nota interna"
+                })}
+              </SearchGroup>
+              <SearchGroup title="Conversaciones" view="inbox" items={results.conversations} onOpenResult={onOpenResult}>
+                {(conversation) => ({
+                  key: conversation.id,
+                  title: conversation.contact.fullName,
+                  meta: `${channelLabel(conversation.channel)} / ${conversation.status}`,
+                  conversationId: conversation.id
+                })}
+              </SearchGroup>
+            </>
+          ) : (
+            <p className="muted-text">Sin resultados para esta busqueda.</p>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SearchGroup<T>({
+  children,
+  items,
+  onOpenResult,
+  title,
+  view
+}: {
+  children: (item: T) => { key: string; title: string; meta?: string; conversationId?: string };
+  items: T[];
+  onOpenResult: (view: View, conversationId?: string) => void;
+  title: string;
+  view: View;
+}) {
+  if (!items.length) {
+    return null;
+  }
+
+  return (
+    <section>
+      <h3>{title}</h3>
+      {items.map((item) => {
+        const result = children(item);
+        return (
+          <button key={result.key} onClick={() => onOpenResult(view, result.conversationId)} type="button">
+            <strong>{result.title}</strong>
+            {result.meta ? <span>{result.meta}</span> : null}
+          </button>
+        );
+      })}
+    </section>
   );
 }
 
