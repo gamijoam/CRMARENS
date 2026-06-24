@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
+import { AuditLogsService } from "../audit-logs/audit-logs.service";
 import { CreateContactDto } from "./dto/create-contact.dto";
 import { ImportContactsDto } from "./dto/import-contacts.dto";
 import { ListContactsQueryDto } from "./dto/list-contacts-query.dto";
@@ -8,10 +9,13 @@ import { UpdateContactDto } from "./dto/update-contact.dto";
 
 @Injectable()
 export class ContactsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditLogs: AuditLogsService
+  ) {}
 
-  create(organizationId: string, dto: CreateContactDto) {
-    return this.prisma.contact.create({
+  async create(organizationId: string, actorUserId: string, dto: CreateContactDto) {
+    const contact = await this.prisma.contact.create({
       data: {
         organizationId,
         fullName: dto.fullName,
@@ -31,6 +35,17 @@ export class ContactsService {
       },
       include: { channels: true }
     });
+
+    await this.auditLogs.create({
+      action: "contact.created",
+      actorUserId,
+      entityId: contact.id,
+      entityType: "contact",
+      metadata: { fullName: contact.fullName },
+      organizationId
+    });
+
+    return contact;
   }
 
   findMany(organizationId: string, query: ListContactsQueryDto) {
@@ -125,17 +140,25 @@ export class ContactsService {
     });
   }
 
-  async remove(organizationId: string, id: string) {
+  async remove(organizationId: string, actorUserId: string, id: string) {
     await this.ensureContactExists(organizationId, id);
 
     await this.prisma.contact.delete({
       where: { id }
     });
 
+    await this.auditLogs.create({
+      action: "contact.deleted",
+      actorUserId,
+      entityId: id,
+      entityType: "contact",
+      organizationId
+    });
+
     return { deleted: true };
   }
 
-  async importMany(organizationId: string, dto: ImportContactsDto) {
+  async importMany(organizationId: string, actorUserId: string, dto: ImportContactsDto) {
     const normalizedRows = dto.contacts.map((contact, index) => ({
       index,
       fullName: contact.fullName.trim(),
@@ -196,12 +219,22 @@ export class ContactsService {
       }
     }
 
-    return {
+    const result = {
       created: created.length,
       skipped: skipped.length,
       total: normalizedRows.length,
       skippedRows: skipped
     };
+
+    await this.auditLogs.create({
+      action: "contacts.imported",
+      actorUserId,
+      entityType: "contact",
+      metadata: result,
+      organizationId
+    });
+
+    return result;
   }
 
   private async ensureContactExists(organizationId: string, id: string) {

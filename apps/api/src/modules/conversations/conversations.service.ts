@@ -3,13 +3,17 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { canViewTeamData, ensureCanAssignTo, scopedAssignedUserId } from "../../shared/access-policy";
 import { AuthenticatedUser } from "../../shared/authenticated-user";
+import { AuditLogsService } from "../audit-logs/audit-logs.service";
 import { AssignConversationDto } from "./dto/assign-conversation.dto";
 import { CreateConversationDto } from "./dto/create-conversation.dto";
 import { ListConversationsQueryDto } from "./dto/list-conversations-query.dto";
 
 @Injectable()
 export class ConversationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditLogs: AuditLogsService
+  ) {}
 
   async create(organizationId: string, user: AuthenticatedUser, dto: CreateConversationDto) {
     await this.ensureContactExists(organizationId, dto.contactId);
@@ -23,7 +27,7 @@ export class ConversationsService {
 
     const assignedUserId = dto.assignedUserId ?? (!canViewTeamData(user) ? user.sub : undefined);
 
-    return this.prisma.conversation.create({
+    const conversation = await this.prisma.conversation.create({
       data: {
         organizationId,
         contactId: dto.contactId,
@@ -33,6 +37,21 @@ export class ConversationsService {
       },
       include: this.conversationInclude()
     });
+
+    await this.auditLogs.create({
+      action: "conversation.created",
+      actorUserId: user.sub,
+      entityId: conversation.id,
+      entityType: "conversation",
+      metadata: {
+        assignedUserId: conversation.assignedUserId,
+        channel: conversation.channel,
+        contactId: conversation.contactId
+      },
+      organizationId
+    });
+
+    return conversation;
   }
 
   findMany(organizationId: string, user: AuthenticatedUser, query: ListConversationsQueryDto) {
@@ -92,21 +111,43 @@ export class ConversationsService {
       await this.ensureOrganizationUserExists(organizationId, dto.assignedUserId);
     }
 
-    return this.prisma.conversation.update({
+    const conversation = await this.prisma.conversation.update({
       where: { id },
       data: { assignedUserId: dto.assignedUserId ?? null },
       include: this.conversationInclude()
     });
+
+    await this.auditLogs.create({
+      action: "conversation.assigned",
+      actorUserId: user.sub,
+      entityId: id,
+      entityType: "conversation",
+      metadata: { assignedUserId: conversation.assignedUserId },
+      organizationId
+    });
+
+    return conversation;
   }
 
   async close(organizationId: string, user: AuthenticatedUser, id: string) {
     await this.findOne(organizationId, user, id);
 
-    return this.prisma.conversation.update({
+    const conversation = await this.prisma.conversation.update({
       where: { id },
       data: { status: "closed" },
       include: this.conversationInclude()
     });
+
+    await this.auditLogs.create({
+      action: "conversation.closed",
+      actorUserId: user.sub,
+      entityId: id,
+      entityType: "conversation",
+      metadata: { assignedUserId: conversation.assignedUserId },
+      organizationId
+    });
+
+    return conversation;
   }
 
   private conversationInclude() {

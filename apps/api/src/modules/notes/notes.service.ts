@@ -3,18 +3,22 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { canViewTeamData } from "../../shared/access-policy";
 import { AuthenticatedUser } from "../../shared/authenticated-user";
+import { AuditLogsService } from "../audit-logs/audit-logs.service";
 import { CreateNoteDto } from "./dto/create-note.dto";
 import { ListNotesQueryDto } from "./dto/list-notes-query.dto";
 import { UpdateNoteDto } from "./dto/update-note.dto";
 
 @Injectable()
 export class NotesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditLogs: AuditLogsService
+  ) {}
 
   async create(organizationId: string, userId: string, dto: CreateNoteDto) {
     await this.ensureTargetsBelongToOrganization(organizationId, dto.contactId, dto.leadId);
 
-    return this.prisma.note.create({
+    const note = await this.prisma.note.create({
       data: {
         organizationId,
         contactId: dto.contactId,
@@ -24,6 +28,17 @@ export class NotesService {
       },
       include: this.noteInclude()
     });
+
+    await this.auditLogs.create({
+      action: "note.created",
+      actorUserId: userId,
+      entityId: note.id,
+      entityType: "note",
+      metadata: { contactId: note.contactId, createdByUserId: note.createdByUserId, leadId: note.leadId },
+      organizationId
+    });
+
+    return note;
   }
 
   findMany(organizationId: string, user: AuthenticatedUser, query: ListNotesQueryDto) {
@@ -76,16 +91,36 @@ export class NotesService {
   async update(organizationId: string, user: AuthenticatedUser, id: string, dto: UpdateNoteDto) {
     await this.findOne(organizationId, user, id);
 
-    return this.prisma.note.update({
+    const note = await this.prisma.note.update({
       where: { id },
       data: { body: dto.body },
       include: this.noteInclude()
     });
+
+    await this.auditLogs.create({
+      action: "note.updated",
+      actorUserId: user.sub,
+      entityId: id,
+      entityType: "note",
+      metadata: { createdByUserId: note.createdByUserId },
+      organizationId
+    });
+
+    return note;
   }
 
   async remove(organizationId: string, user: AuthenticatedUser, id: string) {
     await this.findOne(organizationId, user, id);
     await this.prisma.note.delete({ where: { id } });
+
+    await this.auditLogs.create({
+      action: "note.deleted",
+      actorUserId: user.sub,
+      entityId: id,
+      entityType: "note",
+      organizationId
+    });
+
     return { deleted: true };
   }
 

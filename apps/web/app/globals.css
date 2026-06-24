@@ -789,6 +789,34 @@ textarea:focus {
   font-size: 12px;
 }
 
+.activity-list {
+  display: grid;
+  gap: 12px;
+}
+
+.activity-row {
+  align-items: start;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.activity-dot {
+  background: var(--accent);
+  border-radius: 999px;
+  box-shadow: 0 0 0 5px rgba(15, 118, 110, 0.12);
+  height: 10px;
+  margin-top: 5px;
+  width: 10px;
+}
+
+.activity-row p,
+.activity-row small {
+  color: var(--muted);
+  display: block;
+  margin: 4px 0 0;
+}
+
 .spin {
   animation: spin 0.9s linear infinite;
 }

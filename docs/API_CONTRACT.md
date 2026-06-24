@@ -7,6 +7,10 @@ Prefijo global: `/api`
 - `POST /auth/login`: inicia sesion.
 - `GET /auth/me`: devuelve usuario actual desde JWT.
 
+## Audit Logs
+
+- `GET /audit-logs`: lista actividad de la organizacion activa. Acepta `action`, `actorUserId` y `entityType`. Respeta visibilidad por rol.
+
 ## Organizations
 
 - `POST /organizations`: crea organizacion.

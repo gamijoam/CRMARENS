@@ -27,7 +27,7 @@ export class ContactsController {
 
   @Post()
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateContactDto) {
-    return this.contactsService.create(requireOrganization(user), dto);
+    return this.contactsService.create(requireOrganization(user), user.sub, dto);
   }
 
   @Get()
@@ -38,7 +38,7 @@ export class ContactsController {
   @Post("import")
   importMany(@CurrentUser() user: AuthenticatedUser, @Body() dto: ImportContactsDto) {
     requireRole(user, ["owner", "admin", "supervisor"]);
-    return this.contactsService.importMany(requireOrganization(user), dto);
+    return this.contactsService.importMany(requireOrganization(user), user.sub, dto);
   }
 
   @Get(":id")
@@ -57,6 +57,6 @@ export class ContactsController {
 
   @Delete(":id")
   remove(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
-    return this.contactsService.remove(requireOrganization(user), id);
+    return this.contactsService.remove(requireOrganization(user), user.sub, id);
   }
 }

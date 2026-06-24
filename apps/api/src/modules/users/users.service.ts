@@ -4,13 +4,17 @@ import * as bcrypt from "bcryptjs";
 import { PrismaService } from "../../prisma/prisma.service";
 import { canViewTeamData } from "../../shared/access-policy";
 import { AuthenticatedUser } from "../../shared/authenticated-user";
+import { AuditLogsService } from "../audit-logs/audit-logs.service";
 import { CreateUserDto } from "./dto/create-user.dto";
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditLogs: AuditLogsService
+  ) {}
 
-  async create(organizationId: string, dto: CreateUserDto) {
+  async create(organizationId: string, actorUserId: string, dto: CreateUserDto) {
     const existingUser = await this.prisma.user.findUnique({
       where: { email: dto.email }
     });
@@ -29,7 +33,7 @@ export class UsersService {
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
 
-    return this.prisma.user.create({
+    const user = await this.prisma.user.create({
       data: {
         name: dto.name,
         email: dto.email,
@@ -43,6 +47,17 @@ export class UsersService {
       },
       select: this.userSelect(organizationId)
     });
+
+    await this.auditLogs.create({
+      action: "user.created",
+      actorUserId,
+      entityId: user.id,
+      entityType: "user",
+      metadata: { email: user.email, role: user.organizations[0]?.role },
+      organizationId
+    });
+
+    return user;
   }
 
   findMany(organizationId: string, user: AuthenticatedUser) {

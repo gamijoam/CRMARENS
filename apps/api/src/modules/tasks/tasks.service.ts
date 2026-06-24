@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { canViewTeamData, ensureCanAssignTo, scopedAssignedUserId } from "../../shared/access-policy";
 import { AuthenticatedUser } from "../../shared/authenticated-user";
+import { AuditLogsService } from "../audit-logs/audit-logs.service";
 import { AssignTaskDto } from "./dto/assign-task.dto";
 import { CreateTaskDto } from "./dto/create-task.dto";
 import { ListTasksQueryDto } from "./dto/list-tasks-query.dto";
@@ -11,7 +12,10 @@ import { UpdateTaskDto } from "./dto/update-task.dto";
 
 @Injectable()
 export class TasksService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditLogs: AuditLogsService
+  ) {}
 
   async create(organizationId: string, user: AuthenticatedUser, dto: CreateTaskDto) {
     await this.ensureTargetsBelongToOrganization(organizationId, dto.contactId, dto.leadId);
@@ -20,7 +24,7 @@ export class TasksService {
       await this.ensureOrganizationUserExists(organizationId, dto.assignedUserId);
     }
 
-    return this.prisma.task.create({
+    const task = await this.prisma.task.create({
       data: {
         organizationId,
         contactId: dto.contactId,
@@ -33,6 +37,17 @@ export class TasksService {
       },
       include: this.taskInclude()
     });
+
+    await this.auditLogs.create({
+      action: "task.created",
+      actorUserId: user.sub,
+      entityId: task.id,
+      entityType: "task",
+      metadata: { assignedUserId: task.assignedUserId, contactId: task.contactId, leadId: task.leadId },
+      organizationId
+    });
+
+    return task;
   }
 
   findMany(organizationId: string, user: AuthenticatedUser, query: ListTasksQueryDto) {
@@ -91,11 +106,22 @@ export class TasksService {
   async updateStatus(organizationId: string, user: AuthenticatedUser, id: string, dto: UpdateTaskStatusDto) {
     await this.findOne(organizationId, user, id);
 
-    return this.prisma.task.update({
+    const task = await this.prisma.task.update({
       where: { id },
       data: { status: dto.status },
       include: this.taskInclude()
     });
+
+    await this.auditLogs.create({
+      action: `task.${dto.status}`,
+      actorUserId: user.sub,
+      entityId: id,
+      entityType: "task",
+      metadata: { assignedUserId: task.assignedUserId, status: task.status },
+      organizationId
+    });
+
+    return task;
   }
 
   async assign(organizationId: string, user: AuthenticatedUser, id: string, dto: AssignTaskDto) {
@@ -105,11 +131,22 @@ export class TasksService {
       await this.ensureOrganizationUserExists(organizationId, dto.assignedUserId);
     }
 
-    return this.prisma.task.update({
+    const task = await this.prisma.task.update({
       where: { id },
       data: { assignedUserId: dto.assignedUserId ?? null },
       include: this.taskInclude()
     });
+
+    await this.auditLogs.create({
+      action: "task.assigned",
+      actorUserId: user.sub,
+      entityId: id,
+      entityType: "task",
+      metadata: { assignedUserId: task.assignedUserId },
+      organizationId
+    });
+
+    return task;
   }
 
   private taskInclude() {

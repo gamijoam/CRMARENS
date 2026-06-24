@@ -6,6 +6,7 @@ import {
   CircleDot,
   ClipboardList,
   CornerDownLeft,
+  History,
   Cable,
   Inbox,
   Loader2,
@@ -23,7 +24,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-type View = "inbox" | "contacts" | "leads" | "tasks" | "notes" | "team" | "channels";
+type View = "inbox" | "contacts" | "leads" | "tasks" | "notes" | "team" | "channels" | "activity";
 type InboxFilter = "open" | "mine" | "unassigned" | "closed";
 
 interface SessionUser {
@@ -166,6 +167,21 @@ interface GlobalSearchResults {
   total: number;
 }
 
+interface AuditLog {
+  id: string;
+  action: string;
+  actor?: {
+    id: string;
+    name: string;
+    email: string;
+  } | null;
+  actorUserId?: string;
+  createdAt: string;
+  entityId?: string;
+  entityType: string;
+  metadata?: Record<string, unknown>;
+}
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 
 const navItems: Array<{ id: View; label: string; icon: typeof Inbox }> = [
@@ -175,7 +191,8 @@ const navItems: Array<{ id: View; label: string; icon: typeof Inbox }> = [
   { id: "tasks", label: "Tareas", icon: ClipboardList },
   { id: "notes", label: "Notas", icon: StickyNote },
   { id: "channels", label: "Canales", icon: Cable },
-  { id: "team", label: "Equipo", icon: ShieldCheck }
+  { id: "team", label: "Equipo", icon: ShieldCheck },
+  { id: "activity", label: "Actividad", icon: History }
 ];
 
 export function CrmApp() {
@@ -192,6 +209,7 @@ export function CrmApp() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [channelConnections, setChannelConnections] = useState<ChannelConnection[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [inboxFilter, setInboxFilter] = useState<InboxFilter>("open");
@@ -310,7 +328,8 @@ export function CrmApp() {
         nextNotes,
         nextConversations,
         nextTeamMembers,
-        nextChannelConnections
+        nextChannelConnections,
+        nextAuditLogs
       ] =
         await Promise.all([
           api<Contact[]>("/contacts", { token: activeToken }),
@@ -320,7 +339,8 @@ export function CrmApp() {
           api<Note[]>("/notes", { token: activeToken }),
           api<Conversation[]>("/conversations", { token: activeToken }),
           api<TeamMember[]>("/users", { token: activeToken }),
-          api<ChannelConnection[]>("/channel-connections", { token: activeToken })
+          api<ChannelConnection[]>("/channel-connections", { token: activeToken }),
+          api<AuditLog[]>("/audit-logs", { token: activeToken })
         ]);
 
       setContacts(nextContacts);
@@ -331,6 +351,7 @@ export function CrmApp() {
       setConversations(nextConversations);
       setTeamMembers(nextTeamMembers);
       setChannelConnections(nextChannelConnections);
+      setAuditLogs(nextAuditLogs);
       if (!selectedConversationId && nextConversations[0]) {
         setSelectedConversationId(nextConversations[0].id);
       }
@@ -779,6 +800,10 @@ export function CrmApp() {
         {view === "team" ? (
           <TeamView currentUser={user} members={teamMembers} onSubmit={submitTeamMember} />
         ) : null}
+
+        {view === "activity" ? (
+          <ActivityView logs={auditLogs} members={teamMembers} />
+        ) : null}
       </section>
     </main>
   );
@@ -792,7 +817,8 @@ function titleForView(view: View) {
     tasks: "Tareas",
     notes: "Notas internas",
     team: "Equipo y permisos",
-    channels: "Canales y conexiones"
+    channels: "Canales y conexiones",
+    activity: "Actividad"
   };
   return titles[view];
 }
@@ -1471,6 +1497,63 @@ function TeamView({
   );
 }
 
+function ActivityView({ logs, members }: { logs: AuditLog[]; members: TeamMember[] }) {
+  const [entityType, setEntityType] = useState("");
+  const [actorUserId, setActorUserId] = useState("");
+  const [action, setAction] = useState("");
+  const actions = [...new Set(logs.map((log) => log.action))].sort();
+  const entityTypes = [...new Set(logs.map((log) => log.entityType))].sort();
+  const filteredLogs = logs.filter(
+    (log) =>
+      (!entityType || log.entityType === entityType) &&
+      (!actorUserId || log.actorUserId === actorUserId) &&
+      (!action || log.action === action)
+  );
+
+  return (
+    <section className="content-grid">
+      <Panel title="Filtros" eyebrow="Auditoria">
+        <div className="stack-form">
+          <select onChange={(event) => setEntityType(event.currentTarget.value)} value={entityType}>
+            <option value="">Tipo de entidad</option>
+            {entityTypes.map((type) => (
+              <option key={type} value={type}>{entityLabel(type)}</option>
+            ))}
+          </select>
+          <select onChange={(event) => setActorUserId(event.currentTarget.value)} value={actorUserId}>
+            <option value="">Actor</option>
+            {members.map((member) => (
+              <option key={member.id} value={member.id}>{member.name}</option>
+            ))}
+          </select>
+          <select onChange={(event) => setAction(event.currentTarget.value)} value={action}>
+            <option value="">Accion</option>
+            {actions.map((item) => (
+              <option key={item} value={item}>{actionLabel(item)}</option>
+            ))}
+          </select>
+        </div>
+      </Panel>
+
+      <Panel title="Timeline" eyebrow={`${filteredLogs.length} eventos`}>
+        <div className="activity-list">
+          {filteredLogs.map((log) => (
+            <article className="activity-row" key={log.id}>
+              <span className="activity-dot" />
+              <div>
+                <strong>{actionLabel(log.action)}</strong>
+                <p>{log.actor?.name ?? "Sistema"} / {entityLabel(log.entityType)}</p>
+                <small>{formatDate(log.createdAt)}{log.entityId ? ` / ${log.entityId}` : ""}</small>
+              </div>
+            </article>
+          ))}
+          {!filteredLogs.length ? <p className="muted-text">Sin actividad para estos filtros.</p> : null}
+        </div>
+      </Panel>
+    </section>
+  );
+}
+
 function AssigneeSelect({
   assignedUserId,
   members,
@@ -1745,6 +1828,50 @@ function channelLabel(channel: string) {
     whatsapp: "WhatsApp"
   };
   return labels[channel] ?? channel;
+}
+
+function actionLabel(action: string) {
+  const labels: Record<string, string> = {
+    "channel_connection.created": "Conexion creada",
+    "channel_connection.status_changed": "Estado de canal cambiado",
+    "contact.created": "Contacto creado",
+    "contact.deleted": "Contacto eliminado",
+    "contacts.imported": "Contactos importados",
+    "conversation.assigned": "Chat asignado",
+    "conversation.closed": "Chat cerrado",
+    "conversation.created": "Chat creado",
+    "lead.assigned": "Lead asignado",
+    "lead.created": "Lead creado",
+    "lead.lost": "Lead perdido",
+    "lead.open": "Lead abierto",
+    "lead.won": "Lead ganado",
+    "message.inbound": "Mensaje entrante",
+    "message.outbound": "Mensaje enviado",
+    "note.created": "Nota creada",
+    "note.deleted": "Nota eliminada",
+    "note.updated": "Nota actualizada",
+    "task.assigned": "Tarea asignada",
+    "task.canceled": "Tarea cancelada",
+    "task.created": "Tarea creada",
+    "task.done": "Tarea completada",
+    "task.open": "Tarea abierta",
+    "user.created": "Usuario creado"
+  };
+  return labels[action] ?? action;
+}
+
+function entityLabel(entityType: string) {
+  const labels: Record<string, string> = {
+    channel_connection: "Canal",
+    contact: "Contacto",
+    conversation: "Conversacion",
+    lead: "Lead",
+    message: "Mensaje",
+    note: "Nota",
+    task: "Tarea",
+    user: "Usuario"
+  };
+  return labels[entityType] ?? entityType;
 }
 
 function Panel({

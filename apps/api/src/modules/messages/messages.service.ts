@@ -3,12 +3,16 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { canViewTeamData } from "../../shared/access-policy";
 import { AuthenticatedUser } from "../../shared/authenticated-user";
+import { AuditLogsService } from "../audit-logs/audit-logs.service";
 import { CreateMessageDto } from "./dto/create-message.dto";
 import { UpdateMessageStatusDto } from "./dto/update-message-status.dto";
 
 @Injectable()
 export class MessagesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditLogs: AuditLogsService
+  ) {}
 
   async create(
     organizationId: string,
@@ -44,6 +48,19 @@ export class MessagesService {
           lastMessageAt: message.createdAt,
           status: "open"
         }
+      });
+
+      await this.auditLogs.create({
+        action: `message.${dto.direction}`,
+        actorUserId: user.sub,
+        entityId: message.id,
+        entityType: "message",
+        metadata: {
+          assignedUserId: conversation.assignedUserId,
+          conversationId,
+          direction: dto.direction
+        },
+        organizationId
       });
 
       return message;
@@ -110,6 +127,7 @@ export class MessagesService {
       },
       select: {
         id: true,
+        assignedUserId: true,
         channel: true
       }
     });

@@ -15,7 +15,7 @@ export class UsersController {
   @Post()
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateUserDto) {
     requireRole(user, ["owner", "admin"]);
-    return this.usersService.create(requireOrganization(user), dto);
+    return this.usersService.create(requireOrganization(user), user.sub, dto);
   }
 
   @Get()

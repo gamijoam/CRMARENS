@@ -16,7 +16,7 @@ export class ChannelConnectionsController {
   @Post()
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateChannelConnectionDto) {
     requireRole(user, ["owner", "admin"]);
-    return this.channelConnectionsService.create(requireOrganization(user), dto);
+    return this.channelConnectionsService.create(requireOrganization(user), user.sub, dto);
   }
 
   @Get()
@@ -36,6 +36,6 @@ export class ChannelConnectionsController {
     @Body() dto: UpdateChannelConnectionStatusDto
   ) {
     requireRole(user, ["owner", "admin"]);
-    return this.channelConnectionsService.updateStatus(requireOrganization(user), id, dto);
+    return this.channelConnectionsService.updateStatus(requireOrganization(user), user.sub, id, dto);
   }
 }

@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { canViewTeamData, ensureCanAssignTo, scopedAssignedUserId } from "../../shared/access-policy";
 import { AuthenticatedUser } from "../../shared/authenticated-user";
+import { AuditLogsService } from "../audit-logs/audit-logs.service";
 import { AssignLeadDto } from "./dto/assign-lead.dto";
 import { CreateLeadDto } from "./dto/create-lead.dto";
 import { ListLeadsQueryDto } from "./dto/list-leads-query.dto";
@@ -11,7 +12,10 @@ import { UpdateLeadStatusDto } from "./dto/update-lead-status.dto";
 
 @Injectable()
 export class LeadsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditLogs: AuditLogsService
+  ) {}
 
   async create(organizationId: string, user: AuthenticatedUser, dto: CreateLeadDto) {
     await this.ensureContactExists(organizationId, dto.contactId);
@@ -31,7 +35,7 @@ export class LeadsService {
 
     const assignedUserId = dto.assignedUserId ?? (!canViewTeamData(user) ? user.sub : undefined);
 
-    return this.prisma.lead.create({
+    const lead = await this.prisma.lead.create({
       data: {
         organizationId,
         contactId: dto.contactId,
@@ -43,6 +47,17 @@ export class LeadsService {
       },
       include: this.leadInclude()
     });
+
+    await this.auditLogs.create({
+      action: "lead.created",
+      actorUserId: user.sub,
+      entityId: lead.id,
+      entityType: "lead",
+      metadata: { assignedUserId: lead.assignedUserId, contactId: lead.contactId, value: lead.value?.toString() },
+      organizationId
+    });
+
+    return lead;
   }
 
   findMany(organizationId: string, user: AuthenticatedUser, query: ListLeadsQueryDto) {
@@ -93,11 +108,22 @@ export class LeadsService {
   async updateStatus(organizationId: string, user: AuthenticatedUser, id: string, dto: UpdateLeadStatusDto) {
     await this.findOne(organizationId, user, id);
 
-    return this.prisma.lead.update({
+    const lead = await this.prisma.lead.update({
       where: { id },
       data: { status: dto.status },
       include: this.leadInclude()
     });
+
+    await this.auditLogs.create({
+      action: `lead.${dto.status}`,
+      actorUserId: user.sub,
+      entityId: id,
+      entityType: "lead",
+      metadata: { status: dto.status, assignedUserId: lead.assignedUserId },
+      organizationId
+    });
+
+    return lead;
   }
 
   async assign(organizationId: string, user: AuthenticatedUser, id: string, dto: AssignLeadDto) {
@@ -107,11 +133,22 @@ export class LeadsService {
       await this.ensureOrganizationUserExists(organizationId, dto.assignedUserId);
     }
 
-    return this.prisma.lead.update({
+    const lead = await this.prisma.lead.update({
       where: { id },
       data: { assignedUserId: dto.assignedUserId ?? null },
       include: this.leadInclude()
     });
+
+    await this.auditLogs.create({
+      action: "lead.assigned",
+      actorUserId: user.sub,
+      entityId: id,
+      entityType: "lead",
+      metadata: { assignedUserId: lead.assignedUserId },
+      organizationId
+    });
+
+    return lead;
   }
 
   private leadInclude() {
