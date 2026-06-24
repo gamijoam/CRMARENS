@@ -14,4 +14,8 @@ export class ListLeadsQueryDto {
   @IsOptional()
   @IsIn(leadStatuses)
   status?: (typeof leadStatuses)[number];
+
+  @IsOptional()
+  @IsString()
+  assignedUserId?: string;
 }

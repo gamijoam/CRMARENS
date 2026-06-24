@@ -16,13 +16,13 @@ Prefijo global: `/api`
 ## Users
 
 - `POST /users`: crea usuario y lo vincula a la organizacion activa. Requiere rol `owner` o `admin`.
-- `GET /users`: lista miembros activos de la organizacion activa.
+- `GET /users`: lista miembros activos de la organizacion activa. `seller` solo ve su propio usuario.
 - `GET /users/:id`: obtiene usuario si pertenece a la organizacion activa.
 
 ## Contacts
 
 - `POST /contacts`: crea contacto dentro de la organizacion activa.
-- `POST /contacts/import`: importa contactos en lote desde filas normalizadas de CSV. Omite duplicados por email o telefono.
+- `POST /contacts/import`: importa contactos en lote desde filas normalizadas de CSV. Omite duplicados por email o telefono. Requiere `owner`, `admin` o `supervisor`.
 - `GET /contacts`: lista contactos de la organizacion activa. Acepta `?search=`.
 - `GET /contacts/:id`: obtiene contacto con canales, leads y ultimas conversaciones.
 - `PATCH /contacts/:id`: actualiza datos y reemplaza canales si se envian.
@@ -41,6 +41,8 @@ Prefijo global: `/api`
 - `GET /pipelines`: lista pipelines con etapas y conteo de leads.
 - `GET /pipelines/:id`: obtiene pipeline con etapas.
 - `PATCH /pipelines/:id/stages/reorder`: reordena etapas existentes.
+
+Crear pipelines y reordenar etapas requiere rol `owner` o `admin`.
 
 ## Leads
 
@@ -75,6 +77,8 @@ Prefijo global: `/api`
 - `GET /conversations/:id`: obtiene conversacion con contacto y mensajes.
 - `PATCH /conversations/:id/assign`: asigna o libera vendedor.
 - `PATCH /conversations/:id/close`: cierra conversacion.
+
+Visibilidad operativa: `owner`, `admin` y `supervisor` ven registros de equipo. `seller` ve leads, tareas y conversaciones asignadas a su usuario. Un `seller` solo puede asignar registros a si mismo.
 
 ## Messages
 

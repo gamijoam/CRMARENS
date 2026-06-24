@@ -13,6 +13,7 @@ import { AuthenticatedUser } from "../../shared/authenticated-user";
 import { CurrentUser } from "../../shared/current-user.decorator";
 import { JwtAuthGuard } from "../../shared/jwt-auth.guard";
 import { requireOrganization } from "../../shared/require-organization";
+import { requireRole } from "../../shared/require-role";
 import { ContactsService } from "./contacts.service";
 import { CreateContactDto } from "./dto/create-contact.dto";
 import { ImportContactsDto } from "./dto/import-contacts.dto";
@@ -36,6 +37,7 @@ export class ContactsController {
 
   @Post("import")
   importMany(@CurrentUser() user: AuthenticatedUser, @Body() dto: ImportContactsDto) {
+    requireRole(user, ["owner", "admin", "supervisor"]);
     return this.contactsService.importMany(requireOrganization(user), dto);
   }
 

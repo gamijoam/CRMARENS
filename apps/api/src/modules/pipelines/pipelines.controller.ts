@@ -3,6 +3,7 @@ import { AuthenticatedUser } from "../../shared/authenticated-user";
 import { CurrentUser } from "../../shared/current-user.decorator";
 import { JwtAuthGuard } from "../../shared/jwt-auth.guard";
 import { requireOrganization } from "../../shared/require-organization";
+import { requireRole } from "../../shared/require-role";
 import { CreatePipelineDto } from "./dto/create-pipeline.dto";
 import { ReorderPipelineStagesDto } from "./dto/reorder-pipeline-stages.dto";
 import { PipelinesService } from "./pipelines.service";
@@ -14,6 +15,7 @@ export class PipelinesController {
 
   @Post()
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreatePipelineDto) {
+    requireRole(user, ["owner", "admin"]);
     return this.pipelinesService.create(requireOrganization(user), dto);
   }
 
@@ -33,6 +35,7 @@ export class PipelinesController {
     @Param("id") id: string,
     @Body() dto: ReorderPipelineStagesDto
   ) {
+    requireRole(user, ["owner", "admin"]);
     return this.pipelinesService.reorderStages(requireOrganization(user), id, dto);
   }
 }

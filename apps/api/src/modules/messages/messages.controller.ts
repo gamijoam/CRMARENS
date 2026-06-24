@@ -18,12 +18,12 @@ export class MessagesController {
     @Param("conversationId") conversationId: string,
     @Body() dto: CreateMessageDto
   ) {
-    return this.messagesService.create(requireOrganization(user), user.sub, conversationId, dto);
+    return this.messagesService.create(requireOrganization(user), user, conversationId, dto);
   }
 
   @Get()
   findMany(@CurrentUser() user: AuthenticatedUser, @Param("conversationId") conversationId: string) {
-    return this.messagesService.findMany(requireOrganization(user), conversationId);
+    return this.messagesService.findMany(requireOrganization(user), user, conversationId);
   }
 
   @Patch(":messageId/status")
@@ -35,6 +35,7 @@ export class MessagesController {
   ) {
     return this.messagesService.updateStatus(
       requireOrganization(user),
+      user,
       conversationId,
       messageId,
       dto

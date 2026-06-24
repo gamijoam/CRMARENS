@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
+import { canViewTeamData } from "../../shared/access-policy";
+import { AuthenticatedUser } from "../../shared/authenticated-user";
 import { CreateNoteDto } from "./dto/create-note.dto";
 import { ListNotesQueryDto } from "./dto/list-notes-query.dto";
 import { UpdateNoteDto } from "./dto/update-note.dto";
@@ -24,11 +26,19 @@ export class NotesService {
     });
   }
 
-  findMany(organizationId: string, query: ListNotesQueryDto) {
+  findMany(organizationId: string, user: AuthenticatedUser, query: ListNotesQueryDto) {
     const where: Prisma.NoteWhereInput = {
       organizationId,
       contactId: query.contactId,
-      leadId: query.leadId
+      leadId: query.leadId,
+      ...(canViewTeamData(user)
+        ? {}
+        : {
+            OR: [
+              { createdByUserId: user.sub },
+              { lead: { assignedUserId: user.sub } }
+            ]
+          })
     };
 
     return this.prisma.note.findMany({
@@ -39,9 +49,20 @@ export class NotesService {
     });
   }
 
-  async findOne(organizationId: string, id: string) {
+  async findOne(organizationId: string, user: AuthenticatedUser, id: string) {
     const note = await this.prisma.note.findFirst({
-      where: { id, organizationId },
+      where: {
+        id,
+        organizationId,
+        ...(canViewTeamData(user)
+          ? {}
+          : {
+              OR: [
+                { createdByUserId: user.sub },
+                { lead: { assignedUserId: user.sub } }
+              ]
+            })
+      },
       include: this.noteInclude()
     });
 
@@ -52,8 +73,8 @@ export class NotesService {
     return note;
   }
 
-  async update(organizationId: string, id: string, dto: UpdateNoteDto) {
-    await this.findOne(organizationId, id);
+  async update(organizationId: string, user: AuthenticatedUser, id: string, dto: UpdateNoteDto) {
+    await this.findOne(organizationId, user, id);
 
     return this.prisma.note.update({
       where: { id },
@@ -62,8 +83,8 @@ export class NotesService {
     });
   }
 
-  async remove(organizationId: string, id: string) {
-    await this.findOne(organizationId, id);
+  async remove(organizationId: string, user: AuthenticatedUser, id: string) {
+    await this.findOne(organizationId, user, id);
     await this.prisma.note.delete({ where: { id } });
     return { deleted: true };
   }

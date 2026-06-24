@@ -20,12 +20,12 @@ export class NotesController {
 
   @Get()
   findMany(@CurrentUser() user: AuthenticatedUser, @Query() query: ListNotesQueryDto) {
-    return this.notesService.findMany(requireOrganization(user), query);
+    return this.notesService.findMany(requireOrganization(user), user, query);
   }
 
   @Get(":id")
   findOne(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
-    return this.notesService.findOne(requireOrganization(user), id);
+    return this.notesService.findOne(requireOrganization(user), user, id);
   }
 
   @Patch(":id")
@@ -34,11 +34,11 @@ export class NotesController {
     @Param("id") id: string,
     @Body() dto: UpdateNoteDto
   ) {
-    return this.notesService.update(requireOrganization(user), id, dto);
+    return this.notesService.update(requireOrganization(user), user, id, dto);
   }
 
   @Delete(":id")
   remove(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
-    return this.notesService.remove(requireOrganization(user), id);
+    return this.notesService.remove(requireOrganization(user), user, id);
   }
 }

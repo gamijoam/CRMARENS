@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
+import { canViewTeamData, ensureCanAssignTo, scopedAssignedUserId } from "../../shared/access-policy";
+import { AuthenticatedUser } from "../../shared/authenticated-user";
 import { AssignConversationDto } from "./dto/assign-conversation.dto";
 import { CreateConversationDto } from "./dto/create-conversation.dto";
 import { ListConversationsQueryDto } from "./dto/list-conversations-query.dto";
@@ -9,8 +11,9 @@ import { ListConversationsQueryDto } from "./dto/list-conversations-query.dto";
 export class ConversationsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(organizationId: string, dto: CreateConversationDto) {
+  async create(organizationId: string, user: AuthenticatedUser, dto: CreateConversationDto) {
     await this.ensureContactExists(organizationId, dto.contactId);
+    ensureCanAssignTo(user, dto.assignedUserId);
     if (dto.channelConnectionId) {
       await this.ensureChannelConnectionExists(organizationId, dto.channelConnectionId, dto.channel);
     }
@@ -18,23 +21,25 @@ export class ConversationsService {
       await this.ensureOrganizationUserExists(organizationId, dto.assignedUserId);
     }
 
+    const assignedUserId = dto.assignedUserId ?? (!canViewTeamData(user) ? user.sub : undefined);
+
     return this.prisma.conversation.create({
       data: {
         organizationId,
         contactId: dto.contactId,
         channel: dto.channel,
         channelConnectionId: dto.channelConnectionId,
-        assignedUserId: dto.assignedUserId
+        assignedUserId
       },
       include: this.conversationInclude()
     });
   }
 
-  findMany(organizationId: string, query: ListConversationsQueryDto) {
+  findMany(organizationId: string, user: AuthenticatedUser, query: ListConversationsQueryDto) {
     const where: Prisma.ConversationWhereInput = {
       organizationId,
       status: query.status,
-      assignedUserId: query.assignedUserId,
+      assignedUserId: scopedAssignedUserId(user, query.assignedUserId),
       contactId: query.contactId,
       channel: query.channel
     };
@@ -53,9 +58,13 @@ export class ConversationsService {
     });
   }
 
-  async findOne(organizationId: string, id: string) {
+  async findOne(organizationId: string, user: AuthenticatedUser, id: string) {
     const conversation = await this.prisma.conversation.findFirst({
-      where: { id, organizationId },
+      where: {
+        id,
+        organizationId,
+        ...(canViewTeamData(user) ? {} : { assignedUserId: user.sub })
+      },
       include: {
         ...this.conversationInclude(),
         messages: {
@@ -76,8 +85,9 @@ export class ConversationsService {
     return conversation;
   }
 
-  async assign(organizationId: string, id: string, dto: AssignConversationDto) {
-    await this.findOne(organizationId, id);
+  async assign(organizationId: string, user: AuthenticatedUser, id: string, dto: AssignConversationDto) {
+    await this.findOne(organizationId, user, id);
+    ensureCanAssignTo(user, dto.assignedUserId);
     if (dto.assignedUserId) {
       await this.ensureOrganizationUserExists(organizationId, dto.assignedUserId);
     }
@@ -89,8 +99,8 @@ export class ConversationsService {
     });
   }
 
-  async close(organizationId: string, id: string) {
-    await this.findOne(organizationId, id);
+  async close(organizationId: string, user: AuthenticatedUser, id: string) {
+    await this.findOne(organizationId, user, id);
 
     return this.prisma.conversation.update({
       where: { id },

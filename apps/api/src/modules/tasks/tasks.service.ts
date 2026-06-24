@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
+import { canViewTeamData, ensureCanAssignTo, scopedAssignedUserId } from "../../shared/access-policy";
+import { AuthenticatedUser } from "../../shared/authenticated-user";
 import { AssignTaskDto } from "./dto/assign-task.dto";
 import { CreateTaskDto } from "./dto/create-task.dto";
 import { ListTasksQueryDto } from "./dto/list-tasks-query.dto";
@@ -11,8 +13,9 @@ import { UpdateTaskDto } from "./dto/update-task.dto";
 export class TasksService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(organizationId: string, userId: string, dto: CreateTaskDto) {
+  async create(organizationId: string, user: AuthenticatedUser, dto: CreateTaskDto) {
     await this.ensureTargetsBelongToOrganization(organizationId, dto.contactId, dto.leadId);
+    ensureCanAssignTo(user, dto.assignedUserId);
     if (dto.assignedUserId) {
       await this.ensureOrganizationUserExists(organizationId, dto.assignedUserId);
     }
@@ -25,19 +28,19 @@ export class TasksService {
         title: dto.title,
         description: dto.description,
         dueAt: dto.dueAt,
-        assignedUserId: dto.assignedUserId,
-        createdByUserId: userId
+        assignedUserId: dto.assignedUserId ?? user.sub,
+        createdByUserId: user.sub
       },
       include: this.taskInclude()
     });
   }
 
-  findMany(organizationId: string, query: ListTasksQueryDto) {
+  findMany(organizationId: string, user: AuthenticatedUser, query: ListTasksQueryDto) {
     const where: Prisma.TaskWhereInput = {
       organizationId,
       contactId: query.contactId,
       leadId: query.leadId,
-      assignedUserId: query.assignedUserId,
+      assignedUserId: scopedAssignedUserId(user, query.assignedUserId),
       status: query.status
     };
 
@@ -49,9 +52,13 @@ export class TasksService {
     });
   }
 
-  async findOne(organizationId: string, id: string) {
+  async findOne(organizationId: string, user: AuthenticatedUser, id: string) {
     const task = await this.prisma.task.findFirst({
-      where: { id, organizationId },
+      where: {
+        id,
+        organizationId,
+        ...(canViewTeamData(user) ? {} : { assignedUserId: user.sub })
+      },
       include: this.taskInclude()
     });
 
@@ -62,8 +69,9 @@ export class TasksService {
     return task;
   }
 
-  async update(organizationId: string, id: string, dto: UpdateTaskDto) {
-    await this.findOne(organizationId, id);
+  async update(organizationId: string, user: AuthenticatedUser, id: string, dto: UpdateTaskDto) {
+    await this.findOne(organizationId, user, id);
+    ensureCanAssignTo(user, dto.assignedUserId);
     if (dto.assignedUserId) {
       await this.ensureOrganizationUserExists(organizationId, dto.assignedUserId);
     }
@@ -80,8 +88,8 @@ export class TasksService {
     });
   }
 
-  async updateStatus(organizationId: string, id: string, dto: UpdateTaskStatusDto) {
-    await this.findOne(organizationId, id);
+  async updateStatus(organizationId: string, user: AuthenticatedUser, id: string, dto: UpdateTaskStatusDto) {
+    await this.findOne(organizationId, user, id);
 
     return this.prisma.task.update({
       where: { id },
@@ -90,8 +98,9 @@ export class TasksService {
     });
   }
 
-  async assign(organizationId: string, id: string, dto: AssignTaskDto) {
-    await this.findOne(organizationId, id);
+  async assign(organizationId: string, user: AuthenticatedUser, id: string, dto: AssignTaskDto) {
+    await this.findOne(organizationId, user, id);
+    ensureCanAssignTo(user, dto.assignedUserId);
     if (dto.assignedUserId) {
       await this.ensureOrganizationUserExists(organizationId, dto.assignedUserId);
     }

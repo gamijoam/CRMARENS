@@ -20,7 +20,7 @@ export class UsersController {
 
   @Get()
   findMany(@CurrentUser() user: AuthenticatedUser) {
-    return this.usersService.findMany(requireOrganization(user));
+    return this.usersService.findMany(requireOrganization(user), user);
   }
 
   @Get(":id")

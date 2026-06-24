@@ -1,15 +1,18 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
+import { canViewTeamData, scopedAssignedUserId } from "../../shared/access-policy";
+import { AuthenticatedUser } from "../../shared/authenticated-user";
 import { SearchQueryDto } from "./dto/search-query.dto";
 
 @Injectable()
 export class SearchService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async search(organizationId: string, query: SearchQueryDto) {
+  async search(organizationId: string, user: AuthenticatedUser, query: SearchQueryDto) {
     const q = query.q.trim();
     const textMatch = { contains: q, mode: "insensitive" } satisfies Prisma.StringFilter;
+    const scopedAssignee = scopedAssignedUserId(user, query.assignedUserId);
     const [contacts, leads, tasks, notes, conversations] = await Promise.all([
       this.prisma.contact.findMany({
         where: {
@@ -28,7 +31,7 @@ export class SearchService {
         where: {
           organizationId,
           status: query.status,
-          assignedUserId: query.assignedUserId,
+          assignedUserId: scopedAssignee,
           OR: [
             { contact: { fullName: textMatch } },
             { contact: { email: textMatch } },
@@ -50,7 +53,7 @@ export class SearchService {
         where: {
           organizationId,
           status: query.status,
-          assignedUserId: query.assignedUserId,
+          assignedUserId: scopedAssignee,
           OR: [
             { title: textMatch },
             { description: textMatch },
@@ -69,10 +72,22 @@ export class SearchService {
       this.prisma.note.findMany({
         where: {
           organizationId,
-          OR: [
-            { body: textMatch },
-            { contact: { fullName: textMatch } },
-            { lead: { contact: { fullName: textMatch } } }
+          AND: [
+            canViewTeamData(user)
+              ? {}
+              : {
+                  OR: [
+                    { createdByUserId: user.sub },
+                    { lead: { assignedUserId: user.sub } }
+                  ]
+                },
+            {
+              OR: [
+                { body: textMatch },
+                { contact: { fullName: textMatch } },
+                { lead: { contact: { fullName: textMatch } } }
+              ]
+            }
           ]
         },
         include: {
@@ -86,7 +101,7 @@ export class SearchService {
         where: {
           organizationId,
           status: query.status,
-          assignedUserId: query.assignedUserId,
+          assignedUserId: scopedAssignee,
           channel: query.channel,
           OR: [
             { contact: { fullName: textMatch } },

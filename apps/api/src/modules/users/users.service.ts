@@ -2,6 +2,8 @@ import { ConflictException, Injectable, NotFoundException } from "@nestjs/common
 import { Prisma } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
 import { PrismaService } from "../../prisma/prisma.service";
+import { canViewTeamData } from "../../shared/access-policy";
+import { AuthenticatedUser } from "../../shared/authenticated-user";
 import { CreateUserDto } from "./dto/create-user.dto";
 
 @Injectable()
@@ -43,9 +45,10 @@ export class UsersService {
     });
   }
 
-  findMany(organizationId: string) {
+  findMany(organizationId: string, user: AuthenticatedUser) {
     return this.prisma.user.findMany({
       where: {
+        id: canViewTeamData(user) ? undefined : user.sub,
         organizations: {
           some: {
             organizationId,

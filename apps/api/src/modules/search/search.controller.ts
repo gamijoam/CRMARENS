@@ -13,6 +13,6 @@ export class SearchController {
 
   @Get()
   search(@CurrentUser() user: AuthenticatedUser, @Query() query: SearchQueryDto) {
-    return this.searchService.search(requireOrganization(user), query);
+    return this.searchService.search(requireOrganization(user), user, query);
   }
 }

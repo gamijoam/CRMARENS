@@ -17,17 +17,17 @@ export class LeadsController {
 
   @Post()
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateLeadDto) {
-    return this.leadsService.create(requireOrganization(user), dto);
+    return this.leadsService.create(requireOrganization(user), user, dto);
   }
 
   @Get()
   findMany(@CurrentUser() user: AuthenticatedUser, @Query() query: ListLeadsQueryDto) {
-    return this.leadsService.findMany(requireOrganization(user), query);
+    return this.leadsService.findMany(requireOrganization(user), user, query);
   }
 
   @Get(":id")
   findOne(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
-    return this.leadsService.findOne(requireOrganization(user), id);
+    return this.leadsService.findOne(requireOrganization(user), user, id);
   }
 
   @Patch(":id/stage")
@@ -36,7 +36,7 @@ export class LeadsController {
     @Param("id") id: string,
     @Body() dto: MoveLeadStageDto
   ) {
-    return this.leadsService.moveStage(requireOrganization(user), id, dto);
+    return this.leadsService.moveStage(requireOrganization(user), user, id, dto);
   }
 
   @Patch(":id/status")
@@ -45,7 +45,7 @@ export class LeadsController {
     @Param("id") id: string,
     @Body() dto: UpdateLeadStatusDto
   ) {
-    return this.leadsService.updateStatus(requireOrganization(user), id, dto);
+    return this.leadsService.updateStatus(requireOrganization(user), user, id, dto);
   }
 
   @Patch(":id/assign")
@@ -54,6 +54,6 @@ export class LeadsController {
     @Param("id") id: string,
     @Body() dto: AssignLeadDto
   ) {
-    return this.leadsService.assign(requireOrganization(user), id, dto);
+    return this.leadsService.assign(requireOrganization(user), user, id, dto);
   }
 }

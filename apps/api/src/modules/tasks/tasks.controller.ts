@@ -17,17 +17,17 @@ export class TasksController {
 
   @Post()
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateTaskDto) {
-    return this.tasksService.create(requireOrganization(user), user.sub, dto);
+    return this.tasksService.create(requireOrganization(user), user, dto);
   }
 
   @Get()
   findMany(@CurrentUser() user: AuthenticatedUser, @Query() query: ListTasksQueryDto) {
-    return this.tasksService.findMany(requireOrganization(user), query);
+    return this.tasksService.findMany(requireOrganization(user), user, query);
   }
 
   @Get(":id")
   findOne(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
-    return this.tasksService.findOne(requireOrganization(user), id);
+    return this.tasksService.findOne(requireOrganization(user), user, id);
   }
 
   @Patch(":id")
@@ -36,7 +36,7 @@ export class TasksController {
     @Param("id") id: string,
     @Body() dto: UpdateTaskDto
   ) {
-    return this.tasksService.update(requireOrganization(user), id, dto);
+    return this.tasksService.update(requireOrganization(user), user, id, dto);
   }
 
   @Patch(":id/status")
@@ -45,7 +45,7 @@ export class TasksController {
     @Param("id") id: string,
     @Body() dto: UpdateTaskStatusDto
   ) {
-    return this.tasksService.updateStatus(requireOrganization(user), id, dto);
+    return this.tasksService.updateStatus(requireOrganization(user), user, id, dto);
   }
 
   @Patch(":id/assign")
@@ -54,6 +54,6 @@ export class TasksController {
     @Param("id") id: string,
     @Body() dto: AssignTaskDto
   ) {
-    return this.tasksService.assign(requireOrganization(user), id, dto);
+    return this.tasksService.assign(requireOrganization(user), user, id, dto);
   }
 }

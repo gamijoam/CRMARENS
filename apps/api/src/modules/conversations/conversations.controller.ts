@@ -15,17 +15,17 @@ export class ConversationsController {
 
   @Post()
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateConversationDto) {
-    return this.conversationsService.create(requireOrganization(user), dto);
+    return this.conversationsService.create(requireOrganization(user), user, dto);
   }
 
   @Get()
   findMany(@CurrentUser() user: AuthenticatedUser, @Query() query: ListConversationsQueryDto) {
-    return this.conversationsService.findMany(requireOrganization(user), query);
+    return this.conversationsService.findMany(requireOrganization(user), user, query);
   }
 
   @Get(":id")
   findOne(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
-    return this.conversationsService.findOne(requireOrganization(user), id);
+    return this.conversationsService.findOne(requireOrganization(user), user, id);
   }
 
   @Patch(":id/assign")
@@ -34,11 +34,11 @@ export class ConversationsController {
     @Param("id") id: string,
     @Body() dto: AssignConversationDto
   ) {
-    return this.conversationsService.assign(requireOrganization(user), id, dto);
+    return this.conversationsService.assign(requireOrganization(user), user, id, dto);
   }
 
   @Patch(":id/close")
   close(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
-    return this.conversationsService.close(requireOrganization(user), id);
+    return this.conversationsService.close(requireOrganization(user), user, id);
   }
 }
