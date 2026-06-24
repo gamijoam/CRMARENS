@@ -1,0 +1,31 @@
+{
+  "name": "crm-omnicanal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CRM SaaS omnicanal multiempresa sin IA integrada.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "db:generate": "npm run db:generate -w apps/api",
+    "db:migrate": "npm run db:migrate -w apps/api",
+    "db:seed": "npm run db:seed -w apps/api"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "overrides": {
+    "@nestjs/common": "11.1.27",
+    "@nestjs/core": "11.1.27",
+    "@nestjs/platform-express": "11.1.27",
+    "multer": "2.2.0",
+    "postcss": "8.5.15"
+  }
+}

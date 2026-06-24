@@ -1,0 +1,215 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrganizationStatus {
+  active
+  inactive
+}
+
+enum UserStatus {
+  active
+  inactive
+}
+
+enum OrganizationRole {
+  owner
+  admin
+  supervisor
+  seller
+}
+
+model Organization {
+  id        String             @id @default(cuid())
+  name      String
+  status    OrganizationStatus @default(active)
+  timezone  String             @default("America/Caracas")
+  createdAt DateTime           @default(now()) @map("created_at")
+  updatedAt DateTime           @updatedAt @map("updated_at")
+
+  members OrganizationUser[]
+  contacts Contact[]
+  pipelines Pipeline[]
+  leads Lead[]
+  conversations Conversation[]
+  auditLogs AuditLog[]
+
+  @@map("organizations")
+}
+
+model User {
+  id           String     @id @default(cuid())
+  name         String
+  email        String     @unique
+  passwordHash String     @map("password_hash")
+  status       UserStatus @default(active)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  organizations OrganizationUser[]
+  assignedConversations Conversation[] @relation("ConversationAssignee")
+  assignedLeads Lead[] @relation("LeadAssignee")
+  sentMessages Message[] @relation("SentMessages")
+
+  @@map("users")
+}
+
+model OrganizationUser {
+  organizationId String           @map("organization_id")
+  userId         String           @map("user_id")
+  role           OrganizationRole
+  isActive       Boolean          @default(true) @map("is_active")
+  createdAt      DateTime         @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([organizationId, userId])
+  @@map("organization_users")
+}
+
+model Contact {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  fullName       String   @map("full_name")
+  phone          String?
+  email          String?
+  tags           String[] @default([])
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  channels     ContactChannel[]
+  leads        Lead[]
+  conversations Conversation[]
+
+  @@index([organizationId])
+  @@map("contacts")
+}
+
+model ContactChannel {
+  id          String  @id @default(cuid())
+  contactId   String  @map("contact_id")
+  channel     String
+  externalId  String  @map("external_id")
+  displayName String? @map("display_name")
+  username    String?
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([channel, externalId])
+  @@map("contact_channels")
+}
+
+model Pipeline {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  name           String
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  stages       PipelineStage[]
+  leads        Lead[]
+
+  @@index([organizationId])
+  @@unique([organizationId, name])
+  @@map("pipelines")
+}
+
+model PipelineStage {
+  id         String @id @default(cuid())
+  pipelineId String @map("pipeline_id")
+  name       String
+  position   Int
+
+  pipeline Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  leads    Lead[]
+
+  @@unique([pipelineId, position])
+  @@map("pipeline_stages")
+}
+
+model Lead {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  contactId      String   @map("contact_id")
+  pipelineId     String   @map("pipeline_id")
+  stageId        String   @map("stage_id")
+  value          Decimal?
+  currency       String   @default("USD")
+  status         String   @default("open")
+  assignedUserId String?  @map("assigned_user_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contact      Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  pipeline     Pipeline     @relation(fields: [pipelineId], references: [id], onDelete: Restrict)
+  stage        PipelineStage @relation(fields: [stageId], references: [id], onDelete: Restrict)
+  assignee     User?        @relation("LeadAssignee", fields: [assignedUserId], references: [id])
+
+  @@index([organizationId])
+  @@map("leads")
+}
+
+model Conversation {
+  id                  String   @id @default(cuid())
+  organizationId      String   @map("organization_id")
+  contactId           String   @map("contact_id")
+  channelConnectionId String?  @map("channel_connection_id")
+  channel             String
+  status              String   @default("open")
+  assignedUserId      String?  @map("assigned_user_id")
+  lastMessageAt       DateTime? @map("last_message_at")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contact      Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  assignee     User?        @relation("ConversationAssignee", fields: [assignedUserId], references: [id])
+  messages     Message[]
+
+  @@index([organizationId, status])
+  @@map("conversations")
+}
+
+model Message {
+  id                String   @id @default(cuid())
+  conversationId    String   @map("conversation_id")
+  direction         String
+  channel           String
+  externalMessageId String?  @map("external_message_id")
+  type              String   @default("text")
+  text              String?
+  status            String   @default("pending")
+  sentByUserId      String?  @map("sent_by_user_id")
+  rawPayload        Json?    @map("raw_payload")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sentBy       User?        @relation("SentMessages", fields: [sentByUserId], references: [id])
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  actorUserId    String?  @map("actor_user_id")
+  action         String
+  entityType     String   @map("entity_type")
+  entityId       String?  @map("entity_id")
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@map("audit_logs")
+}
