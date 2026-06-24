@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Post, UseGuards } from "@nestjs/common";
 import { CurrentUser } from "../../shared/current-user.decorator";
+import { AuthenticatedUser } from "../../shared/authenticated-user";
 import { JwtAuthGuard } from "../../shared/jwt-auth.guard";
 import { LoginDto } from "./dto/login.dto";
 import { AuthService } from "./auth.service";
@@ -15,7 +16,7 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Get("me")
-  me(@CurrentUser() user: unknown) {
+  me(@CurrentUser() user: AuthenticatedUser) {
     return user;
   }
 }

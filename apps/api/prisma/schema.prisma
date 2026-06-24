@@ -102,7 +102,7 @@ model ContactChannel {
 
   contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
-  @@unique([channel, externalId])
+  @@index([channel, externalId])
   @@map("contact_channels")
 }
 
