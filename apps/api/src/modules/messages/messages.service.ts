@@ -6,6 +6,7 @@ import { AuthenticatedUser } from "../../shared/authenticated-user";
 import { AuditLogsService } from "../audit-logs/audit-logs.service";
 import { CreateMessageDto } from "./dto/create-message.dto";
 import { UpdateMessageStatusDto } from "./dto/update-message-status.dto";
+import { InstagramCloudService } from "./instagram-cloud.service";
 import { WhatsappCloudService } from "./whatsapp-cloud.service";
 
 @Injectable()
@@ -13,6 +14,7 @@ export class MessagesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
+    private readonly instagramCloud: InstagramCloudService,
     private readonly whatsappCloud: WhatsappCloudService
   ) {}
 
@@ -69,7 +71,7 @@ export class MessagesService {
     });
 
     if (dto.direction === "outbound" && conversation.channel === "whatsapp" && dto.text) {
-      const recipient = this.getWhatsappRecipient(conversation);
+      const recipient = this.getChannelRecipient(conversation, "whatsapp") ?? conversation.contact.phone ?? undefined;
       if (recipient) {
         const result = await this.whatsappCloud.sendText({
           text: dto.text,
@@ -96,6 +98,41 @@ export class MessagesService {
           rawPayload: {
             ...(dto.rawPayload ?? {}),
             whatsappCloud: { error: "missing_whatsapp_recipient" }
+          } as Prisma.InputJsonValue,
+          status: "failed"
+        },
+        include: this.messageInclude()
+      });
+    }
+
+    if (dto.direction === "outbound" && conversation.channel === "instagram" && dto.text) {
+      const recipient = this.getChannelRecipient(conversation, "instagram");
+      if (recipient) {
+        const result = await this.instagramCloud.sendText({
+          text: dto.text,
+          to: recipient
+        });
+
+        return this.prisma.message.update({
+          where: { id: message.id },
+          data: {
+            externalMessageId: result.externalMessageId ?? message.externalMessageId,
+            rawPayload: {
+              ...(dto.rawPayload ?? {}),
+              instagramCloud: result.rawPayload
+            } as Prisma.InputJsonValue,
+            status: result.status
+          },
+          include: this.messageInclude()
+        });
+      }
+
+      return this.prisma.message.update({
+        where: { id: message.id },
+        data: {
+          rawPayload: {
+            ...(dto.rawPayload ?? {}),
+            instagramCloud: { error: "missing_instagram_recipient" }
           } as Prisma.InputJsonValue,
           status: "failed"
         },
@@ -172,9 +209,8 @@ export class MessagesService {
           select: {
             phone: true,
             channels: {
-              where: { channel: "whatsapp" },
-              select: { externalId: true },
-              take: 1
+              where: { channel: { in: ["instagram", "whatsapp"] } },
+              select: { channel: true, externalId: true }
             }
           }
         }
@@ -188,9 +224,12 @@ export class MessagesService {
     return conversation;
   }
 
-  private getWhatsappRecipient(conversation: {
-    contact: { channels: Array<{ externalId: string }>; phone: string | null };
-  }) {
-    return conversation.contact.channels[0]?.externalId ?? conversation.contact.phone ?? undefined;
+  private getChannelRecipient(
+    conversation: {
+      contact: { channels: Array<{ channel: string; externalId: string }>; phone: string | null };
+    },
+    channel: string
+  ) {
+    return conversation.contact.channels.find((item) => item.channel === channel)?.externalId;
   }
 }

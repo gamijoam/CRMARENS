@@ -3,6 +3,7 @@ import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditLogsService } from "../audit-logs/audit-logs.service";
+import { MetaInstagramWebhookDto } from "./dto/meta-instagram-webhook.dto";
 import { MetaWhatsAppWebhookDto } from "./dto/meta-whatsapp-webhook.dto";
 
 interface IncomingWhatsappMessage {
@@ -20,6 +21,13 @@ interface IncomingWhatsappStatus {
   recipientId?: string;
   status: string;
   timestamp?: string;
+}
+
+interface IncomingInstagramMessage {
+  externalMessageId: string;
+  from: string;
+  text?: string;
+  timestamp?: number;
 }
 
 @Injectable()
@@ -90,6 +98,51 @@ export class WebhooksService {
     };
   }
 
+  async receiveMetaInstagram(dto: MetaInstagramWebhookDto) {
+    const organizationId = this.config.get<string>("META_INSTAGRAM_ORGANIZATION_ID");
+    if (!organizationId) {
+      throw new NotFoundException("META_INSTAGRAM_ORGANIZATION_ID is not configured");
+    }
+
+    const connection = await this.prisma.channelConnection.findFirst({
+      where: {
+        organizationId,
+        channel: "instagram",
+        status: "active"
+      },
+      orderBy: { createdAt: "asc" },
+      select: { id: true }
+    });
+    const messages = this.extractInstagramMessages(dto);
+    let processed = 0;
+    let skipped = 0;
+
+    for (const message of messages) {
+      if (!message.text) {
+        skipped += 1;
+        continue;
+      }
+
+      const existingMessage = await this.prisma.message.findFirst({
+        where: { externalMessageId: message.externalMessageId },
+        select: { id: true }
+      });
+      if (existingMessage) {
+        skipped += 1;
+        continue;
+      }
+
+      await this.persistIncomingInstagramMessage(organizationId, connection?.id, message, dto);
+      processed += 1;
+    }
+
+    return {
+      processed,
+      received: messages.length,
+      skipped
+    };
+  }
+
   private extractMessages(dto: MetaWhatsAppWebhookDto) {
     const messages: IncomingWhatsappMessage[] = [];
 
@@ -139,6 +192,27 @@ export class WebhooksService {
     }
 
     return statuses;
+  }
+
+  private extractInstagramMessages(dto: MetaInstagramWebhookDto) {
+    const messages: IncomingInstagramMessage[] = [];
+
+    for (const entry of dto.entry ?? []) {
+      for (const event of entry.messaging ?? []) {
+        if (!event.sender?.id || !event.message?.mid) {
+          continue;
+        }
+
+        messages.push({
+          externalMessageId: event.message.mid,
+          from: event.sender.id,
+          text: event.message.text,
+          timestamp: event.timestamp
+        });
+      }
+    }
+
+    return messages;
   }
 
   private async persistStatusUpdate(
@@ -262,6 +336,66 @@ export class WebhooksService {
     return savedMessage;
   }
 
+  private async persistIncomingInstagramMessage(
+    organizationId: string,
+    channelConnectionId: string | undefined,
+    message: IncomingInstagramMessage,
+    rawPayload: MetaInstagramWebhookDto
+  ) {
+    const createdAt = message.timestamp ? new Date(message.timestamp) : new Date();
+    const contact = await this.findOrCreateInstagramContact(organizationId, message);
+    const conversation = await this.findOrCreateChannelConversation(
+      organizationId,
+      contact.id,
+      "instagram",
+      channelConnectionId,
+      createdAt
+    );
+
+    const savedMessage = await this.prisma.$transaction(async (tx) => {
+      const nextMessage = await tx.message.create({
+        data: {
+          channel: "instagram",
+          conversationId: conversation.id,
+          createdAt,
+          direction: "inbound",
+          externalMessageId: message.externalMessageId,
+          rawPayload: rawPayload as Prisma.InputJsonValue,
+          status: "delivered",
+          text: message.text,
+          type: "text"
+        }
+      });
+
+      await tx.conversation.update({
+        where: { id: conversation.id },
+        data: {
+          lastMessageAt: createdAt,
+          status: "open"
+        }
+      });
+
+      return nextMessage;
+    });
+
+    await this.auditLogs.create({
+      action: "message.inbound",
+      entityId: savedMessage.id,
+      entityType: "message",
+      metadata: {
+        assignedUserId: conversation.assignedUserId,
+        channel: "instagram",
+        contactId: contact.id,
+        conversationId: conversation.id,
+        externalMessageId: message.externalMessageId,
+        source: "meta.instagram.webhook"
+      },
+      organizationId
+    });
+
+    return savedMessage;
+  }
+
   private async findOrCreateContact(organizationId: string, message: IncomingWhatsappMessage) {
     const existingByChannel = await this.prisma.contact.findFirst({
       where: {
@@ -318,6 +452,41 @@ export class WebhooksService {
     });
   }
 
+  private async findOrCreateInstagramContact(organizationId: string, message: IncomingInstagramMessage) {
+    const existingByChannel = await this.prisma.contact.findFirst({
+      where: {
+        organizationId,
+        channels: {
+          some: {
+            channel: "instagram",
+            externalId: message.from
+          }
+        }
+      },
+      select: { id: true, fullName: true }
+    });
+
+    if (existingByChannel) {
+      return existingByChannel;
+    }
+
+    return this.prisma.contact.create({
+      data: {
+        fullName: `Instagram ${message.from}`,
+        organizationId,
+        tags: ["instagram"],
+        channels: {
+          create: {
+            channel: "instagram",
+            externalId: message.from,
+            username: message.from
+          }
+        }
+      },
+      select: { id: true, fullName: true }
+    });
+  }
+
   private async findOrCreateConversation(
     organizationId: string,
     contactId: string,
@@ -359,6 +528,55 @@ export class WebhooksService {
         channel: "whatsapp",
         contactId,
         source: "meta.whatsapp.webhook"
+      },
+      organizationId
+    });
+
+    return conversation;
+  }
+
+  private async findOrCreateChannelConversation(
+    organizationId: string,
+    contactId: string,
+    channel: string,
+    channelConnectionId: string | undefined,
+    createdAt: Date
+  ) {
+    const existingConversation = await this.prisma.conversation.findFirst({
+      where: {
+        organizationId,
+        contactId,
+        channel,
+        status: "open"
+      },
+      orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
+      select: { assignedUserId: true, id: true }
+    });
+
+    if (existingConversation) {
+      return existingConversation;
+    }
+
+    const conversation = await this.prisma.conversation.create({
+      data: {
+        channel,
+        channelConnectionId,
+        contactId,
+        createdAt,
+        lastMessageAt: createdAt,
+        organizationId
+      },
+      select: { assignedUserId: true, id: true }
+    });
+
+    await this.auditLogs.create({
+      action: "conversation.created",
+      entityId: conversation.id,
+      entityType: "conversation",
+      metadata: {
+        channel,
+        contactId,
+        source: `meta.${channel}.webhook`
       },
       organizationId
     });

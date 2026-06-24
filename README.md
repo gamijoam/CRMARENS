@@ -52,3 +52,19 @@ Endpoints:
 - `POST /api/webhooks/meta/whatsapp`
 
 Si `META_WHATSAPP_ACCESS_TOKEN` o `META_WHATSAPP_PHONE_NUMBER_ID` no estan configurados, las respuestas outbound por WhatsApp se guardan en modo simulado.
+
+## Webhook Instagram Meta
+
+Variables en `apps/api/.env`:
+
+- `META_INSTAGRAM_VERIFY_TOKEN`: token que configuras en Meta para validar el webhook.
+- `META_INSTAGRAM_ORGANIZATION_ID`: organizacion destino dentro del CRM.
+- `META_INSTAGRAM_ACCESS_TOKEN`: token de acceso generado en Meta.
+- `META_INSTAGRAM_BUSINESS_ACCOUNT_ID`: ID de la cuenta profesional de Instagram.
+
+Endpoints:
+
+- `GET /api/webhooks/meta/instagram`
+- `POST /api/webhooks/meta/instagram`
+
+Si `META_INSTAGRAM_ACCESS_TOKEN` o `META_INSTAGRAM_BUSINESS_ACCOUNT_ID` no estan configurados, las respuestas outbound por Instagram se guardan en modo simulado.
