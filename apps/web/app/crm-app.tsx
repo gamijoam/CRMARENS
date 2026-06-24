@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   CircleDot,
   ClipboardList,
+  CornerDownLeft,
   Inbox,
   Loader2,
   LogOut,
@@ -12,11 +13,14 @@ import {
   Plus,
   Send,
   StickyNote,
+  UserCheck,
+  UserMinus,
   UsersRound
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type View = "inbox" | "contacts" | "leads" | "tasks" | "notes";
+type InboxFilter = "open" | "mine" | "unassigned" | "closed";
 
 interface SessionUser {
   id: string;
@@ -128,6 +132,7 @@ export function CrmApp() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
+  const [inboxFilter, setInboxFilter] = useState<InboxFilter>("open");
 
   useEffect(() => {
     const storedToken = window.localStorage.getItem("crm_token");
@@ -159,6 +164,33 @@ export function CrmApp() {
   const openLeads = leads.filter((lead) => lead.status === "open");
   const openTasks = tasks.filter((task) => task.status === "open");
   const openConversations = conversations.filter((conversation) => conversation.status === "open");
+  const filteredConversations = conversations.filter((conversation) => {
+    if (inboxFilter === "mine") {
+      return conversation.status === "open" && conversation.assignedUserId === user?.id;
+    }
+    if (inboxFilter === "unassigned") {
+      return conversation.status === "open" && !conversation.assignedUserId;
+    }
+    return conversation.status === inboxFilter;
+  });
+  const selectedContactLeads = selectedConversation
+    ? leads.filter((lead) => lead.contactId === selectedConversation.contactId)
+    : [];
+  const selectedContactLeadIds = new Set(selectedContactLeads.map((lead) => lead.id));
+  const selectedContactTasks = selectedConversation
+    ? tasks.filter(
+        (task) =>
+          task.contact?.id === selectedConversation.contactId ||
+          (task.lead?.id ? selectedContactLeadIds.has(task.lead.id) : false)
+      )
+    : [];
+  const selectedContactNotes = selectedConversation
+    ? notes.filter(
+        (note) =>
+          note.contact?.id === selectedConversation.contactId ||
+          (note.lead?.id ? selectedContactLeadIds.has(note.lead.id) : false)
+      )
+    : [];
 
   const pipelineCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -326,6 +358,24 @@ export function CrmApp() {
     event.currentTarget.reset();
   }
 
+  async function submitInboundMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedConversationId) {
+      setNotice("Selecciona una conversacion");
+      return;
+    }
+    const form = new FormData(event.currentTarget);
+    await mutate(`/conversations/${selectedConversationId}/messages`, {
+      direction: "inbound",
+      type: "text",
+      text: form.get("text"),
+      rawPayload: { source: "manual-ui" }
+    });
+    const nextMessages = await api<Message[]>(`/conversations/${selectedConversationId}/messages`, { token });
+    setMessages(nextMessages);
+    event.currentTarget.reset();
+  }
+
   async function mutate(path: string, body: unknown, method = "POST") {
     setNotice("");
     try {
@@ -351,6 +401,14 @@ export function CrmApp() {
 
   async function closeConversation(conversationId: string) {
     await mutate(`/conversations/${conversationId}/close`, {}, "PATCH");
+  }
+
+  async function assignConversationToMe(conversationId: string) {
+    await mutate(`/conversations/${conversationId}/assign`, { assignedUserId: user?.id }, "PATCH");
+  }
+
+  async function unassignConversation(conversationId: string) {
+    await mutate(`/conversations/${conversationId}/assign`, {}, "PATCH");
   }
 
   if (!token || !user) {
@@ -464,14 +522,23 @@ export function CrmApp() {
         {view === "inbox" ? (
           <InboxView
             contacts={contacts}
-            conversations={conversations}
+            conversations={filteredConversations}
+            filter={inboxFilter}
+            leads={selectedContactLeads}
             messages={messages}
+            notes={selectedContactNotes}
             selectedConversation={selectedConversation}
             selectedConversationId={selectedConversationId}
+            tasks={selectedContactTasks}
+            user={user}
+            onAssignToMe={assignConversationToMe}
             onClose={closeConversation}
+            onFilterChange={setInboxFilter}
             onSelectConversation={setSelectedConversationId}
             onSubmitConversation={submitConversation}
+            onSubmitInboundMessage={submitInboundMessage}
             onSubmitMessage={submitMessage}
+            onUnassign={unassignConversation}
           />
         ) : null}
       </section>
@@ -695,27 +762,52 @@ function NotesView({
 function InboxView({
   contacts,
   conversations,
+  filter,
+  leads,
   messages,
+  notes,
   selectedConversation,
   selectedConversationId,
+  tasks,
+  user,
+  onAssignToMe,
   onClose,
+  onFilterChange,
   onSelectConversation,
   onSubmitConversation,
-  onSubmitMessage
+  onSubmitInboundMessage,
+  onSubmitMessage,
+  onUnassign
 }: {
   contacts: Contact[];
   conversations: Conversation[];
+  filter: InboxFilter;
+  leads: Lead[];
   messages: Message[];
+  notes: Note[];
   selectedConversation?: Conversation;
   selectedConversationId: string;
+  tasks: Task[];
+  user: SessionUser;
+  onAssignToMe: (conversationId: string) => void;
   onClose: (conversationId: string) => void;
+  onFilterChange: (filter: InboxFilter) => void;
   onSelectConversation: (conversationId: string) => void;
   onSubmitConversation: (event: FormEvent<HTMLFormElement>) => void;
+  onSubmitInboundMessage: (event: FormEvent<HTMLFormElement>) => void;
   onSubmitMessage: (event: FormEvent<HTMLFormElement>) => void;
+  onUnassign: (conversationId: string) => void;
 }) {
+  const filterOptions: Array<{ label: string; value: InboxFilter }> = [
+    { label: "Abiertos", value: "open" },
+    { label: "Mios", value: "mine" },
+    { label: "Libres", value: "unassigned" },
+    { label: "Cerrados", value: "closed" }
+  ];
+
   return (
     <section className="inbox-layout">
-      <Panel title="Nueva conversacion" eyebrow="Inbox">
+      <Panel className="conversation-panel" title="Bandeja" eyebrow="Inbox">
         <form className="stack-form" onSubmit={onSubmitConversation}>
           <select name="contactId" required>
             <option value="">Selecciona contacto</option>
@@ -731,6 +823,20 @@ function InboxView({
           <button className="primary-button"><MessageSquareText size={17} /> Crear chat</button>
         </form>
 
+        <div className="filter-tabs" role="tablist" aria-label="Filtros de conversaciones">
+          {filterOptions.map((option) => (
+            <button
+              aria-selected={filter === option.value}
+              className={filter === option.value ? "active-tab" : ""}
+              key={option.value}
+              onClick={() => onFilterChange(option.value)}
+              type="button"
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+
         <div className="conversation-list">
           {conversations.map((conversation) => (
             <button
@@ -739,19 +845,48 @@ function InboxView({
               onClick={() => onSelectConversation(conversation.id)}
               type="button"
             >
-              <span>
+              <span className="conversation-main">
                 <strong>{conversation.contact.fullName}</strong>
                 <small>{conversation.channel} · {conversation.status}</small>
+                <em>{conversation.messages?.[0]?.text ?? "Sin mensajes recientes"}</em>
+              </span>
+              <span className="conversation-meta">
+                {conversation.assignedUserId === user.id ? "Mio" : conversation.assignedUserId ? "Asignado" : "Libre"}
+                <small>{formatDate(conversation.lastMessageAt)}</small>
               </span>
             </button>
           ))}
+          {!conversations.length ? <p className="muted-text">No hay conversaciones en este filtro.</p> : null}
         </div>
       </Panel>
 
       <Panel className="chat-panel" title={selectedConversation?.contact.fullName ?? "Selecciona conversacion"} eyebrow="Mensajes">
+        {selectedConversation ? (
+          <div className="chat-actions">
+            <span className={`status-pill ${selectedConversation.status}`}>{selectedConversation.status}</span>
+            {selectedConversation.assignedUserId === user.id ? (
+              <button className="secondary-button" onClick={() => void onUnassign(selectedConversation.id)} type="button">
+                <UserMinus size={16} /> Liberar
+              </button>
+            ) : selectedConversation.status === "open" ? (
+              <button className="secondary-button" onClick={() => void onAssignToMe(selectedConversation.id)} type="button">
+                <UserCheck size={16} /> Asignarme
+              </button>
+            ) : null}
+            {selectedConversation.status === "open" ? (
+              <button className="secondary-button" onClick={() => void onClose(selectedConversation.id)} type="button">
+                Cerrar
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         <div className="message-list">
           {messages.map((message) => (
             <article className={`message-bubble ${message.direction}`} key={message.id}>
+              <header>
+                <strong>{message.direction === "outbound" ? "Agente" : selectedConversation?.contact.fullName ?? "Cliente"}</strong>
+                <time>{formatDate(message.createdAt)}</time>
+              </header>
               <p>{message.text}</p>
               <span>{message.status}</span>
             </article>
@@ -760,16 +895,83 @@ function InboxView({
         </div>
         <form className="message-form" onSubmit={onSubmitMessage}>
           <input name="text" placeholder="Escribe una respuesta" required />
-          <button className="primary-button"><Send size={17} /></button>
+          <button className="primary-button" type="submit"><Send size={17} /></button>
         </form>
-        {selectedConversation?.status === "open" ? (
-          <button className="secondary-button" onClick={() => void onClose(selectedConversation.id)} type="button">
-            Cerrar conversacion
-          </button>
-        ) : null}
+        <form className="message-form inbound-form" onSubmit={onSubmitInboundMessage}>
+          <input name="text" placeholder="Simular mensaje del cliente" required />
+          <button className="secondary-button" type="submit"><CornerDownLeft size={17} /></button>
+        </form>
+      </Panel>
+
+      <Panel className="context-panel" title="Ficha del cliente" eyebrow="Contexto">
+        {selectedConversation ? (
+          <>
+            <section className="context-block">
+              <h3>{selectedConversation.contact.fullName}</h3>
+              <p>{selectedConversation.contact.phone ?? "Sin telefono"}</p>
+              <p>{selectedConversation.contact.email ?? "Sin email"}</p>
+              <div className="tag-list">
+                {selectedConversation.contact.tags.map((tag) => (
+                  <span key={tag}>{tag}</span>
+                ))}
+              </div>
+            </section>
+
+            <ContextList title="Leads" empty="Sin oportunidades">
+              {leads.map((lead) => (
+                <article key={lead.id}>
+                  <strong>{lead.stage.name}</strong>
+                  <span>{lead.status} / {lead.currency} {lead.value ?? 0}</span>
+                </article>
+              ))}
+            </ContextList>
+
+            <ContextList title="Tareas" empty="Sin tareas">
+              {tasks.map((task) => (
+                <article key={task.id}>
+                  <strong>{task.title}</strong>
+                  <span>{task.status}{task.dueAt ? ` / ${formatDate(task.dueAt)}` : ""}</span>
+                </article>
+              ))}
+            </ContextList>
+
+            <ContextList title="Notas" empty="Sin notas">
+              {notes.map((note) => (
+                <article key={note.id}>
+                  <strong>{note.body}</strong>
+                  <span>{formatDate(note.createdAt)}</span>
+                </article>
+              ))}
+            </ContextList>
+          </>
+        ) : (
+          <p className="muted-text">Selecciona una conversacion para ver el historial comercial.</p>
+        )}
       </Panel>
     </section>
   );
+}
+
+function ContextList({ children, empty, title }: { children: React.ReactNode; empty: string; title: string }) {
+  const hasItems = Array.isArray(children) ? children.length > 0 : Boolean(children);
+  return (
+    <section className="context-block">
+      <h3>{title}</h3>
+      <div className="mini-list">{hasItems ? children : <p className="muted-text">{empty}</p>}</div>
+    </section>
+  );
+}
+
+function formatDate(value?: string) {
+  if (!value) {
+    return "Sin fecha";
+  }
+  return new Intl.DateTimeFormat("es-VE", {
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "short"
+  }).format(new Date(value));
 }
 
 function Panel({
