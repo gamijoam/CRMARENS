@@ -50,7 +50,8 @@ export class WebhooksController {
 
   @Post("meta/instagram")
   receiveMetaInstagram(@Body() body: Record<string, unknown>, @Res() response: Response) {
-    console.log("[Meta Instagram Webhook] body:", JSON.stringify(body, null, 2));
+    const entry = Array.isArray(body.entry) ? body.entry : [];
+    console.log(`[Meta Instagram Webhook] received entries=${entry.length}`);
 
     response.status(200).send("EVENT_RECEIVED");
 

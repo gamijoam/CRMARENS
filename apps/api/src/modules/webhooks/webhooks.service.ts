@@ -31,6 +31,11 @@ interface IncomingInstagramMessage {
   timestamp?: number | string;
 }
 
+interface InstagramMessageLookupRef {
+  externalMessageId: string;
+  timestamp?: number | string;
+}
+
 interface InstagramGraphConversationMessage {
   createdTime: string;
   externalMessageId: string;
@@ -171,13 +176,18 @@ export class WebhooksService implements OnModuleInit {
       orderBy: { createdAt: "asc" },
       select: { id: true }
     });
-    const messages = this.extractInstagramMessages(dto);
+    const directMessages = this.extractInstagramMessages(dto);
+    const fallbackRefs = this.extractInstagramMessageLookupRefs(dto).filter(
+      (ref) => !directMessages.some((message) => message.externalMessageId === ref.externalMessageId)
+    );
+    const fallbackMessages = await this.fetchInstagramMessagesByIds(fallbackRefs);
+    const messages = [...directMessages, ...fallbackMessages];
     let processed = 0;
     let skipped = 0;
     let syncedFromGraph = 0;
 
     this.logger.log(
-      `Instagram webhook received=${messages.length} ids=${messages.map((message) => message.externalMessageId).join(",") || "none"}`
+      `Instagram webhook received=${messages.length} direct=${directMessages.length} fallback=${fallbackMessages.length} technical=${fallbackRefs.length}`
     );
 
     for (const message of messages) {
@@ -202,7 +212,7 @@ export class WebhooksService implements OnModuleInit {
       processed += 1;
     }
 
-    if (messages.length === 0 && this.shouldSyncInstagramGraphHistory(dto)) {
+    if (messages.length === 0 && fallbackRefs.length === 0 && this.shouldSyncInstagramGraphHistory(dto)) {
       const syncResult = await this.syncRecentInstagramConversationHistories(organizationId, connection?.id, dto);
       processed += syncResult.processed;
       skipped += syncResult.skipped;
@@ -480,6 +490,68 @@ export class WebhooksService implements OnModuleInit {
     });
   }
 
+  private async fetchInstagramMessagesByIds(refs: InstagramMessageLookupRef[]) {
+    const uniqueRefs = Array.from(
+      refs.reduce((map, ref) => {
+        if (!map.has(ref.externalMessageId)) {
+          map.set(ref.externalMessageId, ref);
+        }
+        return map;
+      }, new Map<string, InstagramMessageLookupRef>())
+    ).map(([, ref]) => ref);
+
+    const messages: IncomingInstagramMessage[] = [];
+
+    for (const ref of uniqueRefs) {
+      const message = await this.fetchInstagramMessageById(ref.externalMessageId, ref.timestamp);
+      if (message) {
+        messages.push(message);
+      }
+    }
+
+    return messages;
+  }
+
+  private async fetchInstagramMessageById(externalMessageId: string, timestamp?: number | string) {
+    const accessToken = this.config.get<string>("META_INSTAGRAM_ACCESS_TOKEN");
+    const graphVersion = this.config.get<string>("META_INSTAGRAM_API_VERSION") ?? "v25.0";
+
+    if (!accessToken) {
+      this.logger.warn("Instagram message lookup skipped: META_INSTAGRAM_ACCESS_TOKEN is not configured");
+      return undefined;
+    }
+
+    const url = new URL(`https://graph.facebook.com/${graphVersion}/${externalMessageId}`);
+    url.searchParams.set("fields", "message,from,created_time");
+
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+    if (!response.ok) {
+      this.logger.warn(`Instagram message lookup failed id=${externalMessageId} payload=${JSON.stringify(payload)}`);
+      return undefined;
+    }
+
+    const text = typeof payload.message === "string" ? payload.message : undefined;
+    const from = this.asRecord(payload.from);
+    const fromId = typeof from?.id === "string" ? from.id : undefined;
+
+    if (!text || !fromId) {
+      this.logger.log(`Instagram message lookup returned no text id=${externalMessageId}`);
+      return undefined;
+    }
+
+    return {
+      externalMessageId,
+      from: fromId,
+      profileName: typeof from?.name === "string" ? from.name : undefined,
+      text,
+      timestamp: typeof payload.created_time === "string" ? payload.created_time : timestamp
+    };
+  }
+
   private async getLatestSyncedInstagramConversationTime(organizationId: string, metaConversationId: string) {
     const recentMessages = await this.prisma.message.findMany({
       where: {
@@ -557,8 +629,6 @@ export class WebhooksService implements OnModuleInit {
       const message = this.extractInstagramMessageValue(dto.value);
       if (message) {
         messages.push(message);
-      } else if (this.hasInstagramMessageEdit(dto.value)) {
-        this.logger.log("Instagram webhook ignored message_edit payload");
       }
     }
 
@@ -571,18 +641,10 @@ export class WebhooksService implements OnModuleInit {
         const message = this.extractInstagramMessageValue(change.value);
         if (message) {
           messages.push(message);
-        } else if (this.hasInstagramMessageEdit(change.value)) {
-          this.logger.log("Instagram webhook ignored message_edit change");
         }
       }
 
       for (const event of entry.messaging ?? []) {
-        const eventRecord = event as unknown as Record<string, unknown>;
-        if (this.hasInstagramMessageEdit(eventRecord)) {
-          this.logger.log("Instagram webhook ignored message_edit event");
-          continue;
-        }
-
         if (!event.sender?.id || !event.message?.mid || typeof event.message.text !== "string") {
           continue;
         }
@@ -597,6 +659,43 @@ export class WebhooksService implements OnModuleInit {
     }
 
     return messages;
+  }
+
+  private extractInstagramMessageLookupRefs(dto: MetaInstagramWebhookDto) {
+    const refs: InstagramMessageLookupRef[] = [];
+
+    if (dto.field === "messages" && dto.value) {
+      const ref = this.extractInstagramMessageLookupRef(dto.value);
+      if (ref) {
+        refs.push(ref);
+      }
+    }
+
+    for (const entry of dto.entry ?? []) {
+      for (const change of entry.changes ?? []) {
+        if (change.field !== "messages" || !change.value) {
+          continue;
+        }
+
+        const ref = this.extractInstagramMessageLookupRef(change.value);
+        if (ref) {
+          refs.push(ref);
+        }
+      }
+
+      for (const event of entry.messaging ?? []) {
+        const ref = this.extractInstagramMessagingLookupRef(event as unknown as Record<string, unknown>);
+        if (ref) {
+          refs.push(ref);
+        }
+      }
+    }
+
+    if (refs.length > 0) {
+      this.logger.log(`Instagram technical event received count=${refs.length}`);
+    }
+
+    return refs;
   }
 
   private extractInstagramMessageValue(value: Record<string, unknown>) {
@@ -618,8 +717,46 @@ export class WebhooksService implements OnModuleInit {
     };
   }
 
-  private hasInstagramMessageEdit(value: Record<string, unknown>) {
-    return Boolean(this.asRecord(value.message_edit));
+  private extractInstagramMessageLookupRef(value: Record<string, unknown>) {
+    const message = this.asRecord(value.message);
+    const messageEdit = this.asRecord(value.message_edit);
+    const messageText = typeof message?.text === "string" ? message.text : undefined;
+    const externalMessageId =
+      typeof messageEdit?.mid === "string"
+        ? messageEdit.mid
+        : typeof message?.mid === "string" && !messageText
+          ? message.mid
+          : undefined;
+
+    if (!externalMessageId) {
+      return undefined;
+    }
+
+    return {
+      externalMessageId,
+      timestamp: typeof value.timestamp === "number" || typeof value.timestamp === "string" ? value.timestamp : undefined
+    };
+  }
+
+  private extractInstagramMessagingLookupRef(value: Record<string, unknown>) {
+    const message = this.asRecord(value.message);
+    const messageEdit = this.asRecord(value.message_edit);
+    const messageText = typeof message?.text === "string" ? message.text : undefined;
+    const externalMessageId =
+      typeof messageEdit?.mid === "string"
+        ? messageEdit.mid
+        : typeof message?.mid === "string" && !messageText
+          ? message.mid
+          : undefined;
+
+    if (!externalMessageId) {
+      return undefined;
+    }
+
+    return {
+      externalMessageId,
+      timestamp: typeof value.timestamp === "number" || typeof value.timestamp === "string" ? value.timestamp : undefined
+    };
   }
 
   private asRecord(value: unknown) {
@@ -873,6 +1010,13 @@ export class WebhooksService implements OnModuleInit {
     const now = new Date();
     if (timestamp === undefined) {
       return now;
+    }
+
+    if (typeof timestamp === "string") {
+      const parsedDate = new Date(timestamp);
+      if (!Number.isNaN(parsedDate.getTime())) {
+        return parsedDate;
+      }
     }
 
     const value = typeof timestamp === "string" ? Number(timestamp) : timestamp;
