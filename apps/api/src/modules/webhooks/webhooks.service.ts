@@ -26,8 +26,17 @@ interface IncomingWhatsappStatus {
 interface IncomingInstagramMessage {
   externalMessageId: string;
   from: string;
+  profileName?: string;
   text: string;
   timestamp?: number | string;
+}
+
+interface InstagramGraphConversationMessage {
+  createdTime: string;
+  externalMessageId: string;
+  fromId: string;
+  fromName?: string;
+  text: string;
 }
 
 @Injectable()
@@ -118,6 +127,7 @@ export class WebhooksService {
     const messages = this.extractInstagramMessages(dto);
     let processed = 0;
     let skipped = 0;
+    let syncedFromGraph = 0;
 
     this.logger.log(
       `Instagram webhook received=${messages.length} ids=${messages.map((message) => message.externalMessageId).join(",") || "none"}`
@@ -144,11 +154,100 @@ export class WebhooksService {
       processed += 1;
     }
 
-    this.logger.log(`Instagram webhook processed=${processed} skipped=${skipped} received=${messages.length}`);
+    if (messages.length === 0 && this.shouldSyncInstagramGraphHistory(dto)) {
+      const syncResult = await this.syncRecentInstagramConversationHistories(organizationId, connection?.id, dto);
+      processed += syncResult.processed;
+      skipped += syncResult.skipped;
+      syncedFromGraph = syncResult.syncedConversations;
+    }
+
+    this.logger.log(
+      `Instagram webhook processed=${processed} skipped=${skipped} received=${messages.length} syncedFromGraph=${syncedFromGraph}`
+    );
 
     return {
       processed,
       received: messages.length,
+      skipped,
+      syncedFromGraph
+    };
+  }
+
+  async syncInstagramConversationHistory(
+    metaConversationId: string,
+    organizationId = this.config.get<string>("META_INSTAGRAM_ORGANIZATION_ID"),
+    channelConnectionId?: string,
+    rawPayload: Prisma.InputJsonValue = {}
+  ) {
+    if (!organizationId) {
+      throw new NotFoundException("META_INSTAGRAM_ORGANIZATION_ID is not configured");
+    }
+
+    const graphMessages = await this.fetchInstagramConversationMessages(metaConversationId);
+    const latestSyncedAt = await this.getLatestSyncedInstagramConversationTime(organizationId, metaConversationId);
+    const existingIds = new Set(
+      (
+        await this.prisma.message.findMany({
+          where: {
+            externalMessageId: { in: graphMessages.map((message) => message.externalMessageId) }
+          },
+          select: { externalMessageId: true }
+        })
+      )
+        .map((message) => message.externalMessageId)
+        .filter(Boolean) as string[]
+    );
+
+    const ownIds = this.getInstagramOwnAccountIds();
+    const participant = this.pickInstagramConversationParticipant(graphMessages, ownIds);
+    let processed = 0;
+    let skipped = 0;
+
+    for (const graphMessage of graphMessages.sort(
+      (left, right) => new Date(left.createdTime).getTime() - new Date(right.createdTime).getTime()
+    )) {
+      const createdAt = new Date(graphMessage.createdTime);
+      if (Number.isNaN(createdAt.getTime()) || existingIds.has(graphMessage.externalMessageId)) {
+        skipped += 1;
+        continue;
+      }
+
+      if (latestSyncedAt && createdAt <= latestSyncedAt) {
+        skipped += 1;
+        continue;
+      }
+
+      const direction = ownIds.has(graphMessage.fromId) ? "outbound" : "inbound";
+      const contactExternalId = direction === "inbound" ? graphMessage.fromId : participant.fromId;
+
+      await this.persistInstagramGraphMessage(
+        organizationId,
+        channelConnectionId,
+        {
+          externalMessageId: graphMessage.externalMessageId,
+          from: contactExternalId,
+          profileName: direction === "inbound" ? graphMessage.fromName : participant.fromName,
+          text: graphMessage.text,
+          timestamp: graphMessage.createdTime
+        },
+        direction,
+        {
+          metaInstagramConversationId: metaConversationId,
+          source: "meta.instagram.graph.conversation_history",
+          payload: rawPayload,
+          graphMessage
+        } as unknown as Prisma.InputJsonValue
+      );
+      processed += 1;
+    }
+
+    this.logger.log(
+      `Instagram Graph history conversation=${metaConversationId} fetched=${graphMessages.length} processed=${processed} skipped=${skipped}`
+    );
+
+    return {
+      fetched: graphMessages.length,
+      processed,
       skipped
     };
   }
@@ -178,6 +277,159 @@ export class WebhooksService {
     }
 
     return messages;
+  }
+
+  private async syncRecentInstagramConversationHistories(
+    organizationId: string,
+    channelConnectionId: string | undefined,
+    rawPayload: MetaInstagramWebhookDto
+  ) {
+    const metaConversationIds = await this.fetchRecentInstagramConversationIds();
+    let processed = 0;
+    let skipped = 0;
+    let syncedConversations = 0;
+
+    for (const metaConversationId of metaConversationIds) {
+      const result = await this.syncInstagramConversationHistory(
+        metaConversationId,
+        organizationId,
+        channelConnectionId,
+        rawPayload as Prisma.InputJsonValue
+      );
+      processed += result.processed;
+      skipped += result.skipped;
+      syncedConversations += 1;
+    }
+
+    return {
+      processed,
+      skipped,
+      syncedConversations
+    };
+  }
+
+  private async fetchRecentInstagramConversationIds() {
+    const accessToken = this.config.get<string>("META_INSTAGRAM_ACCESS_TOKEN");
+    const graphVersion = this.config.get<string>("META_INSTAGRAM_API_VERSION") ?? "v25.0";
+
+    if (!accessToken) {
+      this.logger.warn("Instagram Graph history sync skipped: META_INSTAGRAM_ACCESS_TOKEN is not configured");
+      return [];
+    }
+
+    const url = new URL(`https://graph.facebook.com/${graphVersion}/me/conversations`);
+    url.searchParams.set("platform", "instagram");
+    url.searchParams.set("limit", "10");
+
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+    if (!response.ok) {
+      this.logger.warn(`Instagram Graph conversations fetch failed: ${JSON.stringify(payload)}`);
+      return [];
+    }
+
+    const data = Array.isArray(payload.data) ? payload.data : [];
+    return data
+      .map((item) => this.asRecord(item)?.id)
+      .filter((id): id is string => typeof id === "string");
+  }
+
+  private async fetchInstagramConversationMessages(metaConversationId: string) {
+    const accessToken = this.config.get<string>("META_INSTAGRAM_ACCESS_TOKEN");
+    const graphVersion = this.config.get<string>("META_INSTAGRAM_API_VERSION") ?? "v25.0";
+
+    if (!accessToken) {
+      this.logger.warn("Instagram Graph history sync skipped: META_INSTAGRAM_ACCESS_TOKEN is not configured");
+      return [];
+    }
+
+    const url = new URL(`https://graph.facebook.com/${graphVersion}/${metaConversationId}`);
+    url.searchParams.set("fields", "messages.limit(50){id,message,from,created_time}");
+
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+    if (!response.ok) {
+      this.logger.warn(`Instagram Graph conversation history fetch failed: ${JSON.stringify(payload)}`);
+      return [];
+    }
+
+    const messages = this.asRecord(payload.messages);
+    const data = Array.isArray(messages?.data) ? messages.data : [];
+
+    return data.flatMap((item): InstagramGraphConversationMessage[] => {
+      const message = this.asRecord(item);
+      const from = this.asRecord(message?.from);
+      const externalMessageId = typeof message?.id === "string" ? message.id : undefined;
+      const text = typeof message?.message === "string" ? message.message : undefined;
+      const fromId = typeof from?.id === "string" ? from.id : undefined;
+      const createdTime = typeof message?.created_time === "string" ? message.created_time : undefined;
+
+      if (!externalMessageId || !text || !fromId || !createdTime) {
+        return [];
+      }
+
+      return [
+        {
+          createdTime,
+          externalMessageId,
+          fromId,
+          fromName: typeof from?.name === "string" ? from.name : undefined,
+          text
+        }
+      ];
+    });
+  }
+
+  private async getLatestSyncedInstagramConversationTime(organizationId: string, metaConversationId: string) {
+    const recentMessages = await this.prisma.message.findMany({
+      where: {
+        channel: "instagram",
+        conversation: { organizationId }
+      },
+      orderBy: { createdAt: "desc" },
+      select: {
+        createdAt: true,
+        rawPayload: true
+      },
+      take: 500
+    });
+
+    return (
+      recentMessages.find((message) => {
+        const rawPayload = this.asRecord(message.rawPayload);
+        return rawPayload?.metaInstagramConversationId === metaConversationId;
+      })?.createdAt ?? null
+    );
+  }
+
+  private getInstagramOwnAccountIds() {
+    return new Set(
+      [
+        this.config.get<string>("META_INSTAGRAM_BUSINESS_ACCOUNT_ID"),
+        this.config.get<string>("META_INSTAGRAM_PAGE_ID")
+      ].filter((value): value is string => Boolean(value))
+    );
+  }
+
+  private pickInstagramConversationParticipant(
+    messages: InstagramGraphConversationMessage[],
+    ownIds: Set<string>
+  ) {
+    return messages.find((message) => !ownIds.has(message.fromId)) ?? messages[0];
+  }
+
+  private shouldSyncInstagramGraphHistory(dto: MetaInstagramWebhookDto) {
+    if (dto.object !== "instagram") {
+      return false;
+    }
+
+    return (dto.entry ?? []).some((entry) => (entry.messaging?.length ?? 0) > 0 || (entry.changes?.length ?? 0) > 0);
   }
 
   private extractStatuses(dto: MetaWhatsAppWebhookDto) {
@@ -461,6 +713,68 @@ export class WebhooksService {
     return savedMessage;
   }
 
+  private async persistInstagramGraphMessage(
+    organizationId: string,
+    channelConnectionId: string | undefined,
+    message: IncomingInstagramMessage,
+    direction: "inbound" | "outbound",
+    rawPayload: Prisma.InputJsonValue
+  ) {
+    const createdAt = this.parseInstagramTimestamp(message.timestamp);
+    const contact = await this.findOrCreateInstagramContact(organizationId, message);
+    const conversation = await this.findOrCreateChannelConversation(
+      organizationId,
+      contact.id,
+      "instagram",
+      channelConnectionId,
+      createdAt
+    );
+
+    const savedMessage = await this.prisma.$transaction(async (tx) => {
+      const nextMessage = await tx.message.create({
+        data: {
+          channel: "instagram",
+          conversationId: conversation.id,
+          createdAt,
+          direction,
+          externalMessageId: message.externalMessageId,
+          rawPayload,
+          status: direction === "inbound" ? "delivered" : "sent",
+          text: message.text,
+          type: "text"
+        }
+      });
+
+      await tx.conversation.update({
+        where: { id: conversation.id },
+        data: {
+          lastMessageAt: createdAt,
+          status: "open"
+        }
+      });
+
+      return nextMessage;
+    });
+
+    await this.auditLogs.create({
+      action: direction === "inbound" ? "message.inbound" : "message.outbound_synced",
+      entityId: savedMessage.id,
+      entityType: "message",
+      metadata: {
+        assignedUserId: conversation.assignedUserId,
+        channel: "instagram",
+        contactId: contact.id,
+        conversationId: conversation.id,
+        direction,
+        externalMessageId: message.externalMessageId,
+        source: "meta.instagram.graph.conversation_history"
+      },
+      organizationId
+    });
+
+    return savedMessage;
+  }
+
   private parseInstagramTimestamp(timestamp: number | string | undefined) {
     const now = new Date();
     if (timestamp === undefined) {
@@ -559,11 +873,12 @@ export class WebhooksService {
 
     return this.prisma.contact.create({
       data: {
-        fullName: `Instagram ${message.from}`,
+        fullName: message.profileName ?? `Instagram ${message.from}`,
         organizationId,
         tags: ["instagram"],
         channels: {
           create: {
+            displayName: message.profileName,
             channel: "instagram",
             externalId: message.from,
             username: message.from
