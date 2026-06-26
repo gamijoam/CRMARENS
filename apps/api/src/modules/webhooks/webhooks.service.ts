@@ -437,16 +437,25 @@ export class WebhooksService {
   }
 
   private parseInstagramTimestamp(timestamp: number | string | undefined) {
+    const now = new Date();
     if (timestamp === undefined) {
-      return new Date();
+      return now;
     }
 
     const value = typeof timestamp === "string" ? Number(timestamp) : timestamp;
     if (!Number.isFinite(value)) {
-      return new Date();
+      return now;
     }
 
-    return new Date(value < 10_000_000_000 ? value * 1000 : value);
+    const parsed = new Date(value < 10_000_000_000 ? value * 1000 : value);
+    const oldestAccepted = new Date("2024-01-01T00:00:00.000Z");
+    const newestAccepted = new Date(now.getTime() + 5 * 60 * 1000);
+
+    if (parsed < oldestAccepted || parsed > newestAccepted) {
+      return now;
+    }
+
+    return parsed;
   }
 
   private async findOrCreateContact(organizationId: string, message: IncomingWhatsappMessage) {
