@@ -182,12 +182,16 @@ export class WebhooksService implements OnModuleInit {
     );
     const fallbackMessages = await this.fetchInstagramMessagesByIds(fallbackRefs);
     const messages = [...directMessages, ...fallbackMessages];
+    const technicalEvents = this.countInstagramTechnicalEvents(dto);
     let processed = 0;
     let skipped = 0;
     let syncedFromGraph = 0;
 
+    if (technicalEvents > 0) {
+      this.logger.log(`Instagram technical events ignored count=${technicalEvents}`);
+    }
     this.logger.log(
-      `Instagram webhook received=${messages.length} direct=${directMessages.length} fallback=${fallbackMessages.length} technical=${fallbackRefs.length}`
+      `Instagram webhook received=${messages.length} direct=${directMessages.length} fallback=${fallbackMessages.length} technical=${technicalEvents}`
     );
 
     for (const message of messages) {
@@ -212,7 +216,12 @@ export class WebhooksService implements OnModuleInit {
       processed += 1;
     }
 
-    if (messages.length === 0 && fallbackRefs.length === 0 && this.shouldSyncInstagramGraphHistory(dto)) {
+    if (
+      messages.length === 0 &&
+      fallbackRefs.length === 0 &&
+      technicalEvents === 0 &&
+      this.shouldSyncInstagramGraphHistory(dto)
+    ) {
       const syncResult = await this.syncRecentInstagramConversationHistories(organizationId, connection?.id, dto);
       processed += syncResult.processed;
       skipped += syncResult.skipped;
@@ -524,32 +533,44 @@ export class WebhooksService implements OnModuleInit {
     const url = new URL(`https://graph.facebook.com/${graphVersion}/${externalMessageId}`);
     url.searchParams.set("fields", "message,from,created_time");
 
-    const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    });
-    const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    try {
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
-    if (!response.ok) {
-      this.logger.warn(`Instagram message lookup failed id=${externalMessageId} payload=${JSON.stringify(payload)}`);
+      if (!response.ok) {
+        const error = this.asRecord(payload.error);
+        this.logger.warn(
+          `Instagram message lookup skipped id=${externalMessageId} code=${error?.code ?? "unknown"}`
+        );
+        return undefined;
+      }
+
+      const text = typeof payload.message === "string" ? payload.message : undefined;
+      const from = this.asRecord(payload.from);
+      const fromId = typeof from?.id === "string" ? from.id : undefined;
+
+      if (!text || !fromId) {
+        this.logger.log(`Instagram message lookup returned no text id=${externalMessageId}`);
+        return undefined;
+      }
+
+      return {
+        externalMessageId,
+        from: fromId,
+        profileName: typeof from?.name === "string" ? from.name : undefined,
+        text,
+        timestamp: typeof payload.created_time === "string" ? payload.created_time : timestamp
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Instagram message lookup network error id=${externalMessageId} message=${
+          error instanceof Error ? error.message : "unknown"
+        }`
+      );
       return undefined;
     }
-
-    const text = typeof payload.message === "string" ? payload.message : undefined;
-    const from = this.asRecord(payload.from);
-    const fromId = typeof from?.id === "string" ? from.id : undefined;
-
-    if (!text || !fromId) {
-      this.logger.log(`Instagram message lookup returned no text id=${externalMessageId}`);
-      return undefined;
-    }
-
-    return {
-      externalMessageId,
-      from: fromId,
-      profileName: typeof from?.name === "string" ? from.name : undefined,
-      text,
-      timestamp: typeof payload.created_time === "string" ? payload.created_time : timestamp
-    };
   }
 
   private async getLatestSyncedInstagramConversationTime(organizationId: string, metaConversationId: string) {
@@ -692,7 +713,7 @@ export class WebhooksService implements OnModuleInit {
     }
 
     if (refs.length > 0) {
-      this.logger.log(`Instagram technical event received count=${refs.length}`);
+      this.logger.log(`Instagram fallback lookup refs count=${refs.length}`);
     }
 
     return refs;
@@ -718,15 +739,13 @@ export class WebhooksService implements OnModuleInit {
   }
 
   private extractInstagramMessageLookupRef(value: Record<string, unknown>) {
+    if (this.isInstagramTechnicalEvent(value)) {
+      return undefined;
+    }
+
     const message = this.asRecord(value.message);
-    const messageEdit = this.asRecord(value.message_edit);
     const messageText = typeof message?.text === "string" ? message.text : undefined;
-    const externalMessageId =
-      typeof messageEdit?.mid === "string"
-        ? messageEdit.mid
-        : typeof message?.mid === "string" && !messageText
-          ? message.mid
-          : undefined;
+    const externalMessageId = typeof message?.mid === "string" && !messageText ? message.mid : undefined;
 
     if (!externalMessageId) {
       return undefined;
@@ -739,15 +758,13 @@ export class WebhooksService implements OnModuleInit {
   }
 
   private extractInstagramMessagingLookupRef(value: Record<string, unknown>) {
+    if (this.isInstagramTechnicalEvent(value)) {
+      return undefined;
+    }
+
     const message = this.asRecord(value.message);
-    const messageEdit = this.asRecord(value.message_edit);
     const messageText = typeof message?.text === "string" ? message.text : undefined;
-    const externalMessageId =
-      typeof messageEdit?.mid === "string"
-        ? messageEdit.mid
-        : typeof message?.mid === "string" && !messageText
-          ? message.mid
-          : undefined;
+    const externalMessageId = typeof message?.mid === "string" && !messageText ? message.mid : undefined;
 
     if (!externalMessageId) {
       return undefined;
@@ -757,6 +774,46 @@ export class WebhooksService implements OnModuleInit {
       externalMessageId,
       timestamp: typeof value.timestamp === "number" || typeof value.timestamp === "string" ? value.timestamp : undefined
     };
+  }
+
+  private countInstagramTechnicalEvents(dto: MetaInstagramWebhookDto) {
+    let count = 0;
+
+    if (dto.value && this.isInstagramTechnicalEvent(dto.value)) {
+      count += 1;
+    }
+
+    for (const entry of dto.entry ?? []) {
+      for (const change of entry.changes ?? []) {
+        if (change.value && this.isInstagramTechnicalEvent(change.value)) {
+          count += 1;
+        }
+      }
+
+      for (const event of entry.messaging ?? []) {
+        if (this.isInstagramTechnicalEvent(event as unknown as Record<string, unknown>)) {
+          count += 1;
+        }
+      }
+    }
+
+    return count;
+  }
+
+  private isInstagramTechnicalEvent(value: Record<string, unknown>) {
+    return [
+      "delivery",
+      "message_edit",
+      "message_reactions",
+      "messaging_handover",
+      "messaging_optins",
+      "messaging_postbacks",
+      "messaging_referral",
+      "messaging_seen",
+      "read",
+      "reaction",
+      "standby"
+    ].some((field) => Boolean(this.asRecord(value[field])));
   }
 
   private asRecord(value: unknown) {
