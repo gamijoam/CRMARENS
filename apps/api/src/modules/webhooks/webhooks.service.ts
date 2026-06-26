@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
@@ -32,6 +32,8 @@ interface IncomingInstagramMessage {
 
 @Injectable()
 export class WebhooksService {
+  private readonly logger = new Logger(WebhooksService.name);
+
   constructor(
     private readonly auditLogs: AuditLogsService,
     private readonly config: ConfigService,
@@ -117,9 +119,14 @@ export class WebhooksService {
     let processed = 0;
     let skipped = 0;
 
+    this.logger.log(
+      `Instagram webhook received=${messages.length} ids=${messages.map((message) => message.externalMessageId).join(",") || "none"}`
+    );
+
     for (const message of messages) {
       if (!message.text) {
         skipped += 1;
+        this.logger.warn(`Instagram webhook skipped message without text id=${message.externalMessageId}`);
         continue;
       }
 
@@ -129,12 +136,15 @@ export class WebhooksService {
       });
       if (existingMessage) {
         skipped += 1;
+        this.logger.warn(`Instagram webhook skipped duplicate id=${message.externalMessageId}`);
         continue;
       }
 
       await this.persistIncomingInstagramMessage(organizationId, connection?.id, message, dto);
       processed += 1;
     }
+
+    this.logger.log(`Instagram webhook processed=${processed} skipped=${skipped} received=${messages.length}`);
 
     return {
       processed,
