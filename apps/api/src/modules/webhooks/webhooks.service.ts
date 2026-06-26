@@ -167,15 +167,34 @@ export class WebhooksService implements OnModuleInit {
       throw new NotFoundException("META_INSTAGRAM_ORGANIZATION_ID is not configured");
     }
 
-    const connection = await this.prisma.channelConnection.findFirst({
-      where: {
-        organizationId,
-        channel: "instagram",
-        status: "active"
-      },
-      orderBy: { createdAt: "asc" },
-      select: { id: true }
-    });
+    const [organization, connection] = await Promise.all([
+      this.prisma.organization.findUnique({
+        where: { id: organizationId },
+        select: { id: true }
+      }),
+      this.prisma.channelConnection.findFirst({
+        where: {
+          organizationId,
+          channel: "instagram",
+          status: "active"
+        },
+        orderBy: { createdAt: "asc" },
+        select: { id: true, name: true }
+      })
+    ]);
+
+    if (!organization) {
+      throw new NotFoundException(`META_INSTAGRAM_ORGANIZATION_ID does not exist: ${organizationId}`);
+    }
+
+    if (!connection) {
+      this.logger.warn(`Instagram webhook has no active channel connection for organization=${organizationId}`);
+    }
+
+    this.logger.log(
+      `Instagram webhook context organization=${organizationId} connection=${connection?.name ?? "none"}`
+    );
+
     const directMessages = this.extractInstagramMessages(dto);
     const fallbackRefs = this.extractInstagramMessageLookupRefs(dto).filter(
       (ref) => !directMessages.some((message) => message.externalMessageId === ref.externalMessageId)
@@ -202,7 +221,11 @@ export class WebhooksService implements OnModuleInit {
       }
 
       const existingMessage = await this.prisma.message.findFirst({
-        where: { externalMessageId: message.externalMessageId },
+        where: {
+          channel: "instagram",
+          conversation: { organizationId },
+          externalMessageId: message.externalMessageId
+        },
         select: { id: true }
       });
       if (existingMessage) {
@@ -212,6 +235,7 @@ export class WebhooksService implements OnModuleInit {
       }
 
       await this.persistIncomingInstagramMessage(organizationId, connection?.id, message, dto);
+      this.logger.log(`Instagram inbound message saved id=${message.externalMessageId} sender=${message.from}`);
       await this.maybeSendInstagramAutoReply(message.from);
       processed += 1;
     }
@@ -231,6 +255,10 @@ export class WebhooksService implements OnModuleInit {
     this.logger.log(
       `Instagram webhook processed=${processed} skipped=${skipped} received=${messages.length} syncedFromGraph=${syncedFromGraph}`
     );
+
+    if (processed === 0 && messages.length === 0 && technicalEvents === 0) {
+      this.logger.warn("Instagram webhook did not contain a text message to save");
+    }
 
     return {
       processed,
@@ -401,24 +429,33 @@ export class WebhooksService implements OnModuleInit {
       };
     }
 
-    const response = await fetch(`https://graph.facebook.com/${graphVersion}/me/messages`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        recipient: { id: recipientId },
-        message: { text }
-      })
-    });
-    const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    try {
+      const response = await fetch(`https://graph.facebook.com/${graphVersion}/me/messages`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          recipient: { id: recipientId },
+          message: { text }
+        })
+      });
+      const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
-    return {
-      messageId: typeof payload.message_id === "string" ? payload.message_id : undefined,
-      ok: response.ok,
-      payload
-    };
+      return {
+        messageId: typeof payload.message_id === "string" ? payload.message_id : undefined,
+        ok: response.ok,
+        payload
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        payload: {
+          error: error instanceof Error ? error.message : "Unknown Instagram API error"
+        }
+      };
+    }
   }
 
   private async fetchRecentInstagramConversationIds() {
@@ -720,6 +757,10 @@ export class WebhooksService implements OnModuleInit {
   }
 
   private extractInstagramMessageValue(value: Record<string, unknown>) {
+    if (this.isInstagramTechnicalEvent(value)) {
+      return undefined;
+    }
+
     const sender = this.asRecord(value.sender);
     const message = this.asRecord(value.message);
     const senderId = typeof sender?.id === "string" ? sender.id : undefined;

@@ -1,14 +1,16 @@
-import { Body, Controller, Get, HttpCode, Post, Query, Res, UnauthorizedException } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Logger, Post, Query, Res, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Response } from "express";
 import { MetaInstagramWebhookDto } from "./dto/meta-instagram-webhook.dto";
 import { MetaWhatsAppWebhookDto } from "./dto/meta-whatsapp-webhook.dto";
 import { WebhooksService } from "./webhooks.service";
 
-const META_INSTAGRAM_VERIFY_TOKEN = "MiTokenSeguro123_";
+const DEFAULT_META_INSTAGRAM_VERIFY_TOKEN = "MiTokenSeguro123_";
 
 @Controller("webhooks")
 export class WebhooksController {
+  private readonly logger = new Logger(WebhooksController.name);
+
   constructor(
     private readonly config: ConfigService,
     private readonly webhooksService: WebhooksService
@@ -41,24 +43,67 @@ export class WebhooksController {
     @Query("hub.challenge") challenge: string | undefined,
     @Res() response: Response
   ) {
-    if (mode === "subscribe" && verifyToken === META_INSTAGRAM_VERIFY_TOKEN) {
+    const expectedToken =
+      this.config.get<string>("META_INSTAGRAM_VERIFY_TOKEN") ?? DEFAULT_META_INSTAGRAM_VERIFY_TOKEN;
+
+    if (mode === "subscribe" && expectedToken && verifyToken === expectedToken) {
       return response.status(200).type("text/plain").send(challenge ?? "");
     }
 
+    this.logger.warn(
+      `Meta Instagram webhook verification failed mode=${mode ?? "missing"} tokenProvided=${Boolean(verifyToken)}`
+    );
     throw new UnauthorizedException("Invalid webhook verification token");
   }
 
   @Post("meta/instagram")
   receiveMetaInstagram(@Body() body: Record<string, unknown>, @Res() response: Response) {
-    const entry = Array.isArray(body.entry) ? body.entry : [];
-    console.log(`[Meta Instagram Webhook] received entries=${entry.length}`);
+    this.logger.log(this.summarizeInstagramWebhook(body));
 
     response.status(200).send("EVENT_RECEIVED");
 
     void this.webhooksService
       .receiveMetaInstagram(body as unknown as MetaInstagramWebhookDto)
       .catch((error: unknown) => {
-        console.error("[Meta Instagram Webhook] async processing failed:", error);
+        this.logger.error(
+          `Meta Instagram webhook async processing failed: ${
+            error instanceof Error ? error.message : "Unknown error"
+          }`
+        );
       });
+  }
+
+  private summarizeInstagramWebhook(body: Record<string, unknown>) {
+    const entries = Array.isArray(body.entry) ? body.entry : [];
+    let messagingEvents = 0;
+    let messagesWithText = 0;
+    let technicalEvents = 0;
+
+    for (const rawEntry of entries) {
+      if (!rawEntry || typeof rawEntry !== "object" || Array.isArray(rawEntry)) {
+        continue;
+      }
+
+      const entry = rawEntry as Record<string, unknown>;
+      const messaging = Array.isArray(entry.messaging) ? entry.messaging : [];
+      messagingEvents += messaging.length;
+
+      for (const rawEvent of messaging) {
+        if (!rawEvent || typeof rawEvent !== "object" || Array.isArray(rawEvent)) {
+          continue;
+        }
+
+        const event = rawEvent as Record<string, unknown>;
+        const message = event.message && typeof event.message === "object" ? event.message as Record<string, unknown> : undefined;
+        if (typeof message?.text === "string") {
+          messagesWithText += 1;
+        }
+        if (event.message_edit || event.reaction || event.delivery || event.read || event.standby) {
+          technicalEvents += 1;
+        }
+      }
+    }
+
+    return `Meta Instagram webhook accepted object=${typeof body.object === "string" ? body.object : "unknown"} entries=${entries.length} messagingEvents=${messagingEvents} textMessages=${messagesWithText} technicalEvents=${technicalEvents}`;
   }
 }
