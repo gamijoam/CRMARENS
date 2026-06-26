@@ -37,7 +37,7 @@ export class InstagramCloudService {
     try {
       const url =
         authMode === "facebook_login"
-          ? `https://graph.facebook.com/${graphVersion}/${instagramBusinessAccountId}/messages`
+          ? `https://graph.facebook.com/${graphVersion}/me/messages`
           : `https://graph.instagram.com/${graphVersion}/me/messages`;
       const response = await fetch(
         url,
@@ -67,7 +67,8 @@ export class InstagramCloudService {
         rawPayload: {
           ...payload,
           authMode,
-          instagramBusinessAccountId
+          instagramBusinessAccountId,
+          url
         },
         status: "sent"
       };
