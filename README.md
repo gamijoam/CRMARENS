@@ -64,6 +64,8 @@ Variables en `apps/api/.env`:
 - `META_INSTAGRAM_BUSINESS_ACCOUNT_ID`: ID de la cuenta profesional de Instagram.
 - `META_INSTAGRAM_API_VERSION`: version de Instagram API a usar, por defecto `v25.0`.
 - `META_INSTAGRAM_AUTH_MODE`: `instagram_login` usa `graph.instagram.com/me/messages`; `facebook_login` usa `graph.facebook.com/{instagram_business_account_id}/messages`.
+- `META_INSTAGRAM_SYNC_ON_STARTUP`: si es `true`, sincroniza conversaciones recientes de Instagram al arrancar el API.
+- `META_INSTAGRAM_AUTO_REPLY_TEXT`: si tiene texto, envia una respuesta automatica por `me/messages` a cada mensaje entrante real.
 
 Endpoints:
 

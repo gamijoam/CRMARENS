@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { Injectable, Logger, NotFoundException, OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
@@ -40,7 +40,7 @@ interface InstagramGraphConversationMessage {
 }
 
 @Injectable()
-export class WebhooksService {
+export class WebhooksService implements OnModuleInit {
   private readonly logger = new Logger(WebhooksService.name);
 
   constructor(
@@ -48,6 +48,53 @@ export class WebhooksService {
     private readonly config: ConfigService,
     private readonly prisma: PrismaService
   ) {}
+
+  onModuleInit() {
+    const shouldSync = this.config.get<string>("META_INSTAGRAM_SYNC_ON_STARTUP") ?? "true";
+    if (shouldSync.toLowerCase() !== "true") {
+      return;
+    }
+
+    void this.syncInstagramOnStartup().catch((error: unknown) => {
+      this.logger.error(
+        `Instagram startup sync failed: ${error instanceof Error ? error.message : "Unknown error"}`
+      );
+    });
+  }
+
+  async syncInstagramOnStartup() {
+    const organizationId = this.config.get<string>("META_INSTAGRAM_ORGANIZATION_ID");
+    const accessToken = this.config.get<string>("META_INSTAGRAM_ACCESS_TOKEN");
+
+    if (!organizationId || !accessToken) {
+      this.logger.warn("Instagram startup sync skipped: organization id or access token is not configured");
+      return {
+        processed: 0,
+        skipped: 0,
+        syncedConversations: 0
+      };
+    }
+
+    const connection = await this.prisma.channelConnection.findFirst({
+      where: {
+        organizationId,
+        channel: "instagram",
+        status: "active"
+      },
+      orderBy: { createdAt: "asc" },
+      select: { id: true }
+    });
+
+    const result = await this.syncRecentInstagramConversationHistories(organizationId, connection?.id, {
+      object: "instagram"
+    });
+
+    this.logger.log(
+      `Instagram startup sync processed=${result.processed} skipped=${result.skipped} syncedConversations=${result.syncedConversations}`
+    );
+
+    return result;
+  }
 
   async receiveMetaWhatsapp(dto: MetaWhatsAppWebhookDto) {
     const organizationId = this.config.get<string>("META_WHATSAPP_ORGANIZATION_ID");
@@ -151,6 +198,7 @@ export class WebhooksService {
       }
 
       await this.persistIncomingInstagramMessage(organizationId, connection?.id, message, dto);
+      await this.maybeSendInstagramAutoReply(message.from);
       processed += 1;
     }
 
@@ -305,6 +353,52 @@ export class WebhooksService {
       processed,
       skipped,
       syncedConversations
+    };
+  }
+
+  private async maybeSendInstagramAutoReply(recipientId: string) {
+    const text = this.config.get<string>("META_INSTAGRAM_AUTO_REPLY_TEXT");
+    if (!text) {
+      return;
+    }
+
+    const result = await this.sendInstagramTextMessage(recipientId, text);
+    if (result.ok) {
+      this.logger.log(`Instagram auto reply sent to=${recipientId} messageId=${result.messageId ?? "unknown"}`);
+      return;
+    }
+
+    this.logger.warn(`Instagram auto reply failed to=${recipientId} payload=${JSON.stringify(result.payload)}`);
+  }
+
+  private async sendInstagramTextMessage(recipientId: string, text: string) {
+    const accessToken = this.config.get<string>("META_INSTAGRAM_ACCESS_TOKEN");
+    const graphVersion = this.config.get<string>("META_INSTAGRAM_API_VERSION") ?? "v25.0";
+
+    if (!accessToken) {
+      return {
+        ok: false,
+        payload: { error: "META_INSTAGRAM_ACCESS_TOKEN is not configured" } as Record<string, unknown>
+      };
+    }
+
+    const response = await fetch(`https://graph.facebook.com/${graphVersion}/me/messages`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        recipient: { id: recipientId },
+        message: { text }
+      })
+    });
+    const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+    return {
+      messageId: typeof payload.message_id === "string" ? payload.message_id : undefined,
+      ok: response.ok,
+      payload
     };
   }
 
