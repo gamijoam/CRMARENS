@@ -341,13 +341,16 @@ interface ReportSummary {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 
-const navItems: Array<{ id: View; label: string; icon: typeof Inbox }> = [
-  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+const primaryNavItems: Array<{ id: View; label: string; icon: typeof Inbox }> = [
   { id: "inbox", label: "Inbox", icon: Inbox },
   { id: "contacts", label: "Contactos", icon: UsersRound },
   { id: "leads", label: "Leads", icon: BarChart3 },
   { id: "tasks", label: "Tareas", icon: ClipboardList },
-  { id: "notes", label: "Notas", icon: StickyNote },
+  { id: "notes", label: "Notas", icon: StickyNote }
+];
+
+const secondaryNavItems: Array<{ id: View; label: string; icon: typeof Inbox }> = [
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "channels", label: "Canales", icon: Cable },
   { id: "team", label: "Equipo", icon: ShieldCheck },
   { id: "activity", label: "Actividad", icon: History },
@@ -357,7 +360,7 @@ const navItems: Array<{ id: View; label: string; icon: typeof Inbox }> = [
 export function CrmApp() {
   const [token, setToken] = useState<string>("");
   const [user, setUser] = useState<SessionUser | null>(null);
-  const [view, setView] = useState<View>("dashboard");
+  const [view, setView] = useState<View>("inbox");
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -962,7 +965,7 @@ export function CrmApp() {
         </div>
 
         <nav className="nav-list">
-          {navItems.map((item) => {
+          {primaryNavItems.map((item) => {
             const Icon = item.icon;
             return (
               <button
@@ -977,6 +980,25 @@ export function CrmApp() {
           })}
         </nav>
 
+        <details className="nav-more" open={secondaryNavItems.some((item) => item.id === view)}>
+          <summary>Mas modulos</summary>
+          <nav className="nav-list nav-list-secondary">
+            {secondaryNavItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  className={view === item.id ? "active" : ""}
+                  key={item.id}
+                  onClick={() => setView(item.id)}
+                  type="button"
+                >
+                  <Icon size={18} /> {item.label}
+                </button>
+              );
+            })}
+          </nav>
+        </details>
+
         <button className="ghost-button" onClick={logout} type="button">
           <LogOut size={17} /> Salir
         </button>
@@ -984,8 +1006,7 @@ export function CrmApp() {
 
       <section className="workspace">
         <header className="topbar">
-          <div>
-            <p className="eyebrow">MVP conectado</p>
+          <div className="topbar-title">
             <h1>{titleForView(view)}</h1>
           </div>
           <div className="topbar-tools">
@@ -1018,16 +1039,18 @@ export function CrmApp() {
 
         {notice ? <p className="status-banner">{notice}</p> : null}
 
-        <section className="metrics" aria-label="Metricas principales">
-          <Metric label="Contactos" value={dashboard?.summary.contacts ?? contacts.length} detail="Base comercial" />
-          <Metric label="Leads abiertos" value={dashboard?.summary.openLeads ?? openLeads.length} detail="Pipeline activo" />
-          <Metric label="Tareas vencidas" value={dashboard?.summary.overdueTasks ?? 0} detail="Atencion requerida" />
-          <Metric
-            label="Chats abiertos"
-            value={dashboard?.summary.openConversations ?? openConversations.length}
-            detail="Inbox"
-          />
-        </section>
+        {view === "inbox" ? null : (
+          <section className="metrics" aria-label="Metricas principales">
+            <Metric label="Contactos" value={dashboard?.summary.contacts ?? contacts.length} detail="Base comercial" />
+            <Metric label="Leads abiertos" value={dashboard?.summary.openLeads ?? openLeads.length} detail="Pipeline activo" />
+            <Metric label="Tareas vencidas" value={dashboard?.summary.overdueTasks ?? 0} detail="Atencion requerida" />
+            <Metric
+              label="Chats abiertos"
+              value={dashboard?.summary.openConversations ?? openConversations.length}
+              detail="Inbox"
+            />
+          </section>
+        )}
 
         {view === "dashboard" ? (
           <DashboardView
@@ -1131,8 +1154,8 @@ export function CrmApp() {
 
 function titleForView(view: View) {
   const titles: Record<View, string> = {
-    dashboard: "Dashboard operativo",
-    inbox: "Inbox de conversaciones",
+    dashboard: "Dashboard",
+    inbox: "Inbox",
     contacts: "Contactos",
     leads: "Leads y pipeline",
     tasks: "Tareas",
@@ -2378,6 +2401,8 @@ function InboxView({
   onUnassign: (conversationId: string) => void;
 }) {
   const messageListRef = useRef<HTMLDivElement | null>(null);
+  const [showComposer, setShowComposer] = useState(false);
+  const [showDevTools, setShowDevTools] = useState(false);
   const lastMessageId = messages[messages.length - 1]?.id;
 
   useEffect(() => {
@@ -2396,35 +2421,45 @@ function InboxView({
     { label: "Abiertos", value: "open" },
     { label: "Mios", value: "mine" },
     { label: "Libres", value: "unassigned" },
-    { label: "SLA", value: "sla" },
+    { label: "Urgentes", value: "sla" },
     { label: "Cerrados", value: "closed" }
   ];
 
   return (
     <section className="inbox-layout">
-      <Panel className="conversation-panel" title="Bandeja" eyebrow="Inbox">
-        <form className="stack-form" onSubmit={onSubmitConversation}>
-          <select name="contactId" required>
-            <option value="">Selecciona contacto</option>
-            {contacts.map((contact) => (
-              <option key={contact.id} value={contact.id}>{contact.fullName}</option>
-            ))}
-          </select>
-          <select name="channel" required>
-            <option value="whatsapp">WhatsApp</option>
-            <option value="instagram">Instagram</option>
-            <option value="messenger">Messenger</option>
-          </select>
-          <select name="channelConnectionId">
-            <option value="">Sin conexion asignada</option>
-            {channelConnections.map((connection) => (
-              <option key={connection.id} value={connection.id}>
-                {channelLabel(connection.channel)} / {connection.name}
-              </option>
-            ))}
-          </select>
-          <button className="primary-button"><MessageSquareText size={17} /> Crear chat</button>
-        </form>
+      <Panel
+        action={(
+          <button className="secondary-button compact-action" onClick={() => setShowComposer((value) => !value)} type="button">
+            <MessageSquareText size={15} /> Nuevo
+          </button>
+        )}
+        className="conversation-panel"
+        title="Conversaciones"
+      >
+        {showComposer ? (
+          <form className="stack-form conversation-composer" onSubmit={onSubmitConversation}>
+            <select name="contactId" required>
+              <option value="">Selecciona contacto</option>
+              {contacts.map((contact) => (
+                <option key={contact.id} value={contact.id}>{contact.fullName}</option>
+              ))}
+            </select>
+            <select name="channel" required>
+              <option value="whatsapp">WhatsApp</option>
+              <option value="instagram">Instagram</option>
+              <option value="messenger">Messenger</option>
+            </select>
+            <select name="channelConnectionId">
+              <option value="">Sin conexion asignada</option>
+              {channelConnections.map((connection) => (
+                <option key={connection.id} value={connection.id}>
+                  {channelLabel(connection.channel)} / {connection.name}
+                </option>
+              ))}
+            </select>
+            <button className="primary-button" type="submit"><Plus size={17} /> Crear</button>
+          </form>
+        ) : null}
 
         <div className="filter-tabs" role="tablist" aria-label="Filtros de conversaciones">
           {filterOptions.map((option) => (
@@ -2449,8 +2484,8 @@ function InboxView({
               type="button"
             >
               <span className="conversation-main">
+                <span className="conversation-channel">{channelLabel(conversation.channel)}</span>
                 <strong>{conversation.contact.fullName}</strong>
-                <small>{conversation.channel} · {conversation.status}</small>
                 <em>{conversation.channelConnection?.name ?? conversation.messages?.[0]?.text ?? "Sin mensajes recientes"}</em>
               </span>
               <span className="conversation-meta">
@@ -2464,7 +2499,11 @@ function InboxView({
         </div>
       </Panel>
 
-      <Panel className="chat-panel" title={selectedConversation?.contact.fullName ?? "Selecciona conversacion"} eyebrow="Mensajes">
+      <Panel
+        className="chat-panel"
+        eyebrow={selectedConversation ? channelLabel(selectedConversation.channel) : undefined}
+        title={selectedConversation?.contact.fullName ?? "Chat"}
+      >
         {selectedConversation ? (
           <div className="chat-actions">
             <span className={`status-pill ${selectedConversation.status}`}>{selectedConversation.status}</span>
@@ -2507,13 +2546,16 @@ function InboxView({
           <input name="text" placeholder="Escribe una respuesta" required />
           <button className="primary-button" type="submit"><Send size={17} /></button>
         </form>
-        <form className="message-form inbound-form" onSubmit={onSubmitInboundMessage}>
-          <input name="text" placeholder="Simular mensaje del cliente" required />
-          <button className="secondary-button" type="submit"><CornerDownLeft size={17} /></button>
-        </form>
+        <details className="dev-tools" open={showDevTools} onToggle={(event) => setShowDevTools(event.currentTarget.open)}>
+          <summary>Herramientas</summary>
+          <form className="message-form inbound-form" onSubmit={onSubmitInboundMessage}>
+            <input name="text" placeholder="Simular mensaje del cliente" required />
+            <button className="secondary-button" type="submit"><CornerDownLeft size={17} /></button>
+          </form>
+        </details>
       </Panel>
 
-      <Panel className="context-panel" title="Ficha del cliente" eyebrow="Contexto">
+      <Panel className="context-panel" title="Cliente">
         {selectedConversation ? (
           <>
             <section className="context-block">
@@ -2748,23 +2790,26 @@ function downloadCsv(filename: string, content: string) {
 }
 
 function Panel({
+  action,
   children,
   className = "",
   eyebrow,
   title
 }: {
+  action?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
-  eyebrow: string;
+  eyebrow?: string;
   title: string;
 }) {
   return (
     <section className={`panel ${className}`}>
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">{eyebrow}</p>
+          {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
           <h2>{title}</h2>
         </div>
+        {action ? <div className="panel-action">{action}</div> : null}
       </div>
       {children}
     </section>
