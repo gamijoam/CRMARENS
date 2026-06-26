@@ -28,7 +28,7 @@ import {
   UsersRound,
   X
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type View = "dashboard" | "inbox" | "contacts" | "leads" | "tasks" | "notes" | "team" | "channels" | "activity" | "reports";
 type InboxFilter = "open" | "mine" | "unassigned" | "sla" | "closed";
@@ -153,6 +153,39 @@ interface TeamMember {
     role: "owner" | "admin" | "supervisor" | "seller";
     isActive: boolean;
   }>;
+}
+
+function playIncomingMessageSound(audioContextRef: { current: AudioContext | null }) {
+  const AudioContextConstructor =
+    window.AudioContext ??
+    (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+
+  if (!AudioContextConstructor) {
+    return;
+  }
+
+  const context = audioContextRef.current ?? new AudioContextConstructor();
+  audioContextRef.current = context;
+
+  if (context.state === "suspended") {
+    void context.resume();
+  }
+
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  const now = context.currentTime;
+
+  oscillator.type = "sine";
+  oscillator.frequency.setValueAtTime(720, now);
+  oscillator.frequency.exponentialRampToValueAtTime(920, now + 0.08);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.08, now + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+  oscillator.start(now);
+  oscillator.stop(now + 0.24);
 }
 
 interface ChannelConnection {
@@ -350,6 +383,9 @@ export function CrmApp() {
   const [searchChannel, setSearchChannel] = useState("");
   const [searchResults, setSearchResults] = useState<GlobalSearchResults | null>(null);
   const [searching, setSearching] = useState(false);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const latestConversationMessageRef = useRef<Record<string, string>>({});
+  const latestMessageByConversationRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     const storedToken = window.localStorage.getItem("crm_token");
@@ -376,6 +412,46 @@ export function CrmApp() {
 
     void api<Message[]>(`/conversations/${selectedConversationId}/messages`, { token }).then(setMessages);
   }, [selectedConversationId, token]);
+
+  useEffect(() => {
+    if (!selectedConversationId) {
+      return;
+    }
+
+    const latestMessage = messages[messages.length - 1];
+    if (!latestMessage) {
+      delete latestMessageByConversationRef.current[selectedConversationId];
+      return;
+    }
+
+    const previousMessageId = latestMessageByConversationRef.current[selectedConversationId];
+    latestMessageByConversationRef.current[selectedConversationId] = latestMessage.id;
+
+    if (previousMessageId && previousMessageId !== latestMessage.id && latestMessage.direction === "inbound") {
+      playIncomingMessageSound(audioContextRef);
+    }
+  }, [messages, selectedConversationId]);
+
+  useEffect(() => {
+    for (const conversation of conversations) {
+      const latestMessage = conversation.messages?.[0];
+      if (!latestMessage) {
+        continue;
+      }
+
+      const previousMessageId = latestConversationMessageRef.current[conversation.id];
+      latestConversationMessageRef.current[conversation.id] = latestMessage.id;
+
+      if (
+        previousMessageId &&
+        previousMessageId !== latestMessage.id &&
+        latestMessage.direction === "inbound" &&
+        conversation.id !== selectedConversationId
+      ) {
+        playIncomingMessageSound(audioContextRef);
+      }
+    }
+  }, [conversations, selectedConversationId]);
 
   useEffect(() => {
     if (!token) {
@@ -2301,6 +2377,21 @@ function InboxView({
   onSubmitMessage: (event: FormEvent<HTMLFormElement>) => void;
   onUnassign: (conversationId: string) => void;
 }) {
+  const messageListRef = useRef<HTMLDivElement | null>(null);
+  const lastMessageId = messages[messages.length - 1]?.id;
+
+  useEffect(() => {
+    const messageList = messageListRef.current;
+    if (!messageList) {
+      return;
+    }
+
+    messageList.scrollTo({
+      top: messageList.scrollHeight,
+      behavior: "smooth"
+    });
+  }, [lastMessageId, selectedConversationId]);
+
   const filterOptions: Array<{ label: string; value: InboxFilter }> = [
     { label: "Abiertos", value: "open" },
     { label: "Mios", value: "mine" },
@@ -2399,7 +2490,7 @@ function InboxView({
             ) : null}
           </div>
         ) : null}
-        <div className="message-list">
+        <div className="message-list" ref={messageListRef}>
           {messages.map((message) => (
             <article className={`message-bubble ${message.direction}`} key={message.id}>
               <header>
