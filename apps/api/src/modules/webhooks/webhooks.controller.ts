@@ -49,8 +49,15 @@ export class WebhooksController {
   }
 
   @Post("meta/instagram")
-  @HttpCode(200)
-  async receiveMetaInstagram(@Body() dto: MetaInstagramWebhookDto) {
-    return this.webhooksService.receiveMetaInstagram(dto);
+  receiveMetaInstagram(@Body() body: Record<string, unknown>, @Res() response: Response) {
+    console.log("[Meta Instagram Webhook] body:", JSON.stringify(body, null, 2));
+
+    response.status(200).send("EVENT_RECEIVED");
+
+    void this.webhooksService
+      .receiveMetaInstagram(body as unknown as MetaInstagramWebhookDto)
+      .catch((error: unknown) => {
+        console.error("[Meta Instagram Webhook] async processing failed:", error);
+      });
   }
 }
