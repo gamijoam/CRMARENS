@@ -78,6 +78,17 @@ Instagram inbound message saved id=test-mid-001 sender=test-user-123
 Instagram webhook processed=1 skipped=0 received=1 syncedFromGraph=0
 ```
 
+Si Meta envia un evento tecnico, por ejemplo `message_edit`, el CRM no lo guarda como mensaje directo. En ese caso lo usa como senal para sincronizar el historial reciente desde Graph:
+
+```text
+Instagram technical events received count=1
+Instagram webhook received=0 direct=0 fallback=0 technical=1
+Instagram webhook has no text payload; syncing Graph history technical=1
+Instagram Graph history conversation=... fetched=... processed=...
+```
+
+Esto evita depender de reiniciar el servidor para que aparezcan mensajes que Meta no envio con `message.text` en el webhook.
+
 Consultas rapidas en PostgreSQL:
 
 ```powershell

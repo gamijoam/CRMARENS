@@ -207,7 +207,7 @@ export class WebhooksService implements OnModuleInit {
     let syncedFromGraph = 0;
 
     if (technicalEvents > 0) {
-      this.logger.log(`Instagram technical events ignored count=${technicalEvents}`);
+      this.logger.log(`Instagram technical events received count=${technicalEvents}`);
     }
     this.logger.log(
       `Instagram webhook received=${messages.length} direct=${directMessages.length} fallback=${fallbackMessages.length} technical=${technicalEvents}`
@@ -243,9 +243,11 @@ export class WebhooksService implements OnModuleInit {
     if (
       messages.length === 0 &&
       fallbackRefs.length === 0 &&
-      technicalEvents === 0 &&
       this.shouldSyncInstagramGraphHistory(dto)
     ) {
+      this.logger.log(
+        `Instagram webhook has no text payload; syncing Graph history technical=${technicalEvents}`
+      );
       const syncResult = await this.syncRecentInstagramConversationHistories(organizationId, connection?.id, dto);
       processed += syncResult.processed;
       skipped += syncResult.skipped;
@@ -256,8 +258,8 @@ export class WebhooksService implements OnModuleInit {
       `Instagram webhook processed=${processed} skipped=${skipped} received=${messages.length} syncedFromGraph=${syncedFromGraph}`
     );
 
-    if (processed === 0 && messages.length === 0 && technicalEvents === 0) {
-      this.logger.warn("Instagram webhook did not contain a text message to save");
+    if (processed === 0 && messages.length === 0 && syncedFromGraph === 0) {
+      this.logger.warn("Instagram webhook did not contain a text message and Graph sync did not run");
     }
 
     return {
