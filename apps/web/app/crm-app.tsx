@@ -716,11 +716,12 @@ export function CrmApp() {
 
   async function submitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const formElement = event.currentTarget;
     if (!selectedConversationId) {
       setNotice("Selecciona una conversacion");
       return;
     }
-    const form = new FormData(event.currentTarget);
+    const form = new FormData(formElement);
     await mutate(`/conversations/${selectedConversationId}/messages`, {
       direction: "outbound",
       type: "text",
@@ -728,16 +729,17 @@ export function CrmApp() {
     });
     const nextMessages = await api<Message[]>(`/conversations/${selectedConversationId}/messages`, { token });
     setMessages(nextMessages);
-    event.currentTarget.reset();
+    formElement.reset();
   }
 
   async function submitInboundMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const formElement = event.currentTarget;
     if (!selectedConversationId) {
       setNotice("Selecciona una conversacion");
       return;
     }
-    const form = new FormData(event.currentTarget);
+    const form = new FormData(formElement);
     await mutate(`/conversations/${selectedConversationId}/messages`, {
       direction: "inbound",
       type: "text",
@@ -746,7 +748,7 @@ export function CrmApp() {
     });
     const nextMessages = await api<Message[]>(`/conversations/${selectedConversationId}/messages`, { token });
     setMessages(nextMessages);
-    event.currentTarget.reset();
+    formElement.reset();
   }
 
   async function mutate(path: string, body: unknown, method = "POST") {
