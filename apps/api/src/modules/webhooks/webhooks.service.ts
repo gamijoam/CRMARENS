@@ -26,7 +26,7 @@ interface IncomingWhatsappStatus {
 interface IncomingInstagramMessage {
   externalMessageId: string;
   from: string;
-  text?: string;
+  text: string;
   timestamp?: number | string;
 }
 
@@ -211,6 +211,8 @@ export class WebhooksService {
       const message = this.extractInstagramMessageValue(dto.value);
       if (message) {
         messages.push(message);
+      } else if (this.hasInstagramMessageEdit(dto.value)) {
+        this.logger.log("Instagram webhook ignored message_edit payload");
       }
     }
 
@@ -223,11 +225,19 @@ export class WebhooksService {
         const message = this.extractInstagramMessageValue(change.value);
         if (message) {
           messages.push(message);
+        } else if (this.hasInstagramMessageEdit(change.value)) {
+          this.logger.log("Instagram webhook ignored message_edit change");
         }
       }
 
       for (const event of entry.messaging ?? []) {
-        if (!event.sender?.id || !event.message?.mid) {
+        const eventRecord = event as unknown as Record<string, unknown>;
+        if (this.hasInstagramMessageEdit(eventRecord)) {
+          this.logger.log("Instagram webhook ignored message_edit event");
+          continue;
+        }
+
+        if (!event.sender?.id || !event.message?.mid || typeof event.message.text !== "string") {
           continue;
         }
 
@@ -248,17 +258,22 @@ export class WebhooksService {
     const message = this.asRecord(value.message);
     const senderId = typeof sender?.id === "string" ? sender.id : undefined;
     const externalMessageId = typeof message?.mid === "string" ? message.mid : undefined;
+    const text = typeof message?.text === "string" ? message.text : undefined;
 
-    if (!senderId || !externalMessageId || !message) {
+    if (!senderId || !externalMessageId || !text) {
       return undefined;
     }
 
     return {
       externalMessageId,
       from: senderId,
-      text: typeof message.text === "string" ? message.text : undefined,
+      text,
       timestamp: typeof value.timestamp === "number" || typeof value.timestamp === "string" ? value.timestamp : undefined
     };
+  }
+
+  private hasInstagramMessageEdit(value: Record<string, unknown>) {
+    return Boolean(this.asRecord(value.message_edit));
   }
 
   private asRecord(value: unknown) {
