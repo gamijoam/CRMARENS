@@ -57,15 +57,16 @@ Si `META_WHATSAPP_ACCESS_TOKEN` o `META_WHATSAPP_PHONE_NUMBER_ID` no estan confi
 
 Variables en `apps/api/.env`:
 
-- `META_INSTAGRAM_VERIFY_TOKEN`: token que configuras en Meta para validar el webhook.
+- `META_INSTAGRAM_VERIFY_TOKEN`: token que configuras en Meta para validar el webhook. El endpoint de Instagram usa `MiTokenSeguro123_`.
 - `META_INSTAGRAM_ORGANIZATION_ID`: organizacion destino dentro del CRM.
 - `META_INSTAGRAM_ACCESS_TOKEN`: token de acceso generado en Meta.
 - `META_INSTAGRAM_BUSINESS_ACCOUNT_ID`: ID de la cuenta profesional de Instagram.
 - `META_INSTAGRAM_API_VERSION`: version de Instagram API a usar, por defecto `v25.0`.
+- `META_INSTAGRAM_AUTH_MODE`: `instagram_login` usa `graph.instagram.com/me/messages`; `facebook_login` usa `graph.facebook.com/{instagram_business_account_id}/messages`.
 
 Endpoints:
 
 - `GET /api/webhooks/meta/instagram`
 - `POST /api/webhooks/meta/instagram`
 
-Si `META_INSTAGRAM_ACCESS_TOKEN` no esta configurado, las respuestas outbound por Instagram se guardan en modo simulado. El envio real usa `https://graph.instagram.com/{version}/me/messages`.
+Si `META_INSTAGRAM_ACCESS_TOKEN` no esta configurado, las respuestas outbound por Instagram se guardan en modo simulado. El envio real soporta tokens de Instagram Login y tokens de Facebook/Page Login, segun `META_INSTAGRAM_AUTH_MODE`.

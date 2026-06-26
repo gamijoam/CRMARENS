@@ -1,8 +1,11 @@
-import { Body, Controller, Get, HttpCode, Query, UnauthorizedException, Post } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Post, Query, Res, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { Response } from "express";
 import { MetaInstagramWebhookDto } from "./dto/meta-instagram-webhook.dto";
 import { MetaWhatsAppWebhookDto } from "./dto/meta-whatsapp-webhook.dto";
 import { WebhooksService } from "./webhooks.service";
+
+const META_INSTAGRAM_VERIFY_TOKEN = "MiTokenSeguro123_";
 
 @Controller("webhooks")
 export class WebhooksController {
@@ -33,13 +36,13 @@ export class WebhooksController {
 
   @Get("meta/instagram")
   verifyMetaInstagram(
-    @Query("hub.mode") mode?: string,
-    @Query("hub.verify_token") verifyToken?: string,
-    @Query("hub.challenge") challenge?: string
+    @Query("hub.mode") mode: string | undefined,
+    @Query("hub.verify_token") verifyToken: string | undefined,
+    @Query("hub.challenge") challenge: string | undefined,
+    @Res() response: Response
   ) {
-    const expectedToken = this.config.get<string>("META_INSTAGRAM_VERIFY_TOKEN");
-    if (mode === "subscribe" && expectedToken && verifyToken === expectedToken) {
-      return challenge ?? "";
+    if (mode === "subscribe" && verifyToken === META_INSTAGRAM_VERIFY_TOKEN) {
+      return response.status(200).type("text/plain").send(challenge ?? "");
     }
 
     throw new UnauthorizedException("Invalid webhook verification token");
