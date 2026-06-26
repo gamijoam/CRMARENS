@@ -1192,6 +1192,33 @@ textarea:focus {
   font-size: 13px;
 }
 
+.settings-list {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-card {
+  align-items: end;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(180px, 1fr) minmax(240px, 1.2fr) auto;
+  padding: 12px;
+}
+
+.settings-card strong,
+.settings-card span {
+  display: block;
+}
+
+.settings-card span {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
 .pipeline-row {
   align-items: center;
   display: grid;
@@ -1474,6 +1501,7 @@ textarea:focus {
   .metrics,
   .dashboard-summary,
   .sla-summary,
+  .settings-card,
   .report-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1503,6 +1531,7 @@ textarea:focus {
   .dashboard-summary,
   .sla-summary,
   .report-metrics,
+  .settings-card,
   .channel-mix,
   .nav-list {
     grid-template-columns: 1fr;

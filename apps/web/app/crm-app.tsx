@@ -54,6 +54,12 @@ interface Contact {
   phone?: string;
   email?: string;
   tags: string[];
+  channels?: Array<{
+    channel: string;
+    displayName?: string | null;
+    externalId: string;
+    username?: string | null;
+  }>;
 }
 
 interface ContactImportRow {
@@ -191,6 +197,12 @@ function playIncomingMessageSound(audioContextRef: { current: AudioContext | nul
 interface ChannelConnection {
   id: string;
   channel: "whatsapp" | "instagram" | "messenger";
+  config?: {
+    accessTokenConfigured?: boolean;
+    accessTokenPreview?: string;
+    accessTokenUpdatedAt?: string;
+    [key: string]: unknown;
+  };
   name: string;
   externalAccountId?: string;
   status: "active" | "inactive";
@@ -351,7 +363,7 @@ const primaryNavItems: Array<{ id: View; label: string; icon: typeof Inbox }> = 
 
 const secondaryNavItems: Array<{ id: View; label: string; icon: typeof Inbox }> = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "channels", label: "Canales", icon: Cable },
+  { id: "channels", label: "Configuracion", icon: Cable },
   { id: "team", label: "Equipo", icon: ShieldCheck },
   { id: "activity", label: "Actividad", icon: History },
   { id: "reports", label: "Reportes", icon: FileText }
@@ -793,6 +805,18 @@ export function CrmApp() {
     event.currentTarget.reset();
   }
 
+  async function submitChannelConnectionConfig(connectionId: string, event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const accessToken = String(form.get("accessToken") ?? "").trim();
+    await mutate(`/channel-connections/${connectionId}/config`, {
+      ...(accessToken ? { accessToken } : {}),
+      externalAccountId: form.get("externalAccountId")
+    }, "PATCH");
+    formElement.reset();
+  }
+
   async function submitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formElement = event.currentTarget;
@@ -1101,6 +1125,7 @@ export function CrmApp() {
             connections={channelConnections}
             currentUser={user}
             onSubmit={submitChannelConnection}
+            onUpdateConfig={submitChannelConnectionConfig}
             onUpdateStatus={updateChannelConnectionStatus}
           />
         ) : null}
@@ -1161,7 +1186,7 @@ function titleForView(view: View) {
     tasks: "Tareas",
     notes: "Notas internas",
     team: "Equipo y permisos",
-    channels: "Canales y conexiones",
+    channels: "Configuracion",
     activity: "Actividad",
     reports: "Reportes"
   };
@@ -1548,7 +1573,7 @@ function GlobalSearch({
               <SearchGroup title="Conversaciones" view="inbox" items={results.conversations} onOpenResult={onOpenResult}>
                 {(conversation) => ({
                   key: conversation.id,
-                  title: conversation.contact.fullName,
+                  title: contactDisplayName(conversation.contact, conversation.channel),
                   meta: `${channelLabel(conversation.channel)} / ${conversation.status}`,
                   conversationId: conversation.id
                 })}
@@ -1992,14 +2017,17 @@ function ChannelsView({
   connections,
   currentUser,
   onSubmit,
+  onUpdateConfig,
   onUpdateStatus
 }: {
   connections: ChannelConnection[];
   currentUser: SessionUser;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onUpdateConfig: (connectionId: string, event: FormEvent<HTMLFormElement>) => void;
   onUpdateStatus: (connectionId: string, status: "active" | "inactive") => void;
 }) {
   const canManage = ["owner", "admin"].includes(currentUser.role);
+  const instagramConnections = connections.filter((connection) => connection.channel === "instagram");
   const channelTotals = connections.reduce<Record<string, number>>((totals, connection) => {
     totals[connection.channel] = (totals[connection.channel] ?? 0) + 1;
     return totals;
@@ -2034,6 +2062,46 @@ function ChannelsView({
           ))}
         </div>
       </Panel>
+
+      {canManage ? (
+        <Panel className="wide-panel" title="Token de Instagram" eyebrow="Admin">
+          <div className="settings-list">
+            {instagramConnections.map((connection) => (
+              <form
+                className="settings-card"
+                key={connection.id}
+                onSubmit={(event) => onUpdateConfig(connection.id, event)}
+              >
+                <div>
+                  <strong>{connection.name}</strong>
+                  <span>
+                    {connection.config?.accessTokenConfigured
+                      ? `Token guardado ${connection.config.accessTokenPreview ?? ""}`
+                      : "Sin token guardado"}
+                  </span>
+                </div>
+                <input
+                  name="externalAccountId"
+                  placeholder="ID cuenta Instagram / Page ID"
+                  defaultValue={connection.externalAccountId ?? ""}
+                />
+                <input
+                  autoComplete="off"
+                  name="accessToken"
+                  placeholder="Pega aqui el Page Access Token nuevo"
+                  type="password"
+                />
+                <button className="primary-button" type="submit">
+                  <CheckCircle2 size={17} /> Guardar token
+                </button>
+              </form>
+            ))}
+            {!instagramConnections.length ? (
+              <p className="muted-text">Crea una conexion de Instagram para guardar el token.</p>
+            ) : null}
+          </div>
+        </Panel>
+      ) : null}
 
       <Panel className="wide-panel" title="Conexiones" eyebrow="Empresa">
         <DataList items={connections} empty="Sin conexiones">
@@ -2485,7 +2553,7 @@ function InboxView({
             >
               <span className="conversation-main">
                 <span className="conversation-channel">{channelLabel(conversation.channel)}</span>
-                <strong>{conversation.contact.fullName}</strong>
+                <strong>{contactDisplayName(conversation.contact, conversation.channel)}</strong>
                 <em>{conversation.channelConnection?.name ?? conversation.messages?.[0]?.text ?? "Sin mensajes recientes"}</em>
               </span>
               <span className="conversation-meta">
@@ -2502,7 +2570,7 @@ function InboxView({
       <Panel
         className="chat-panel"
         eyebrow={selectedConversation ? channelLabel(selectedConversation.channel) : undefined}
-        title={selectedConversation?.contact.fullName ?? "Chat"}
+        title={selectedConversation ? contactDisplayName(selectedConversation.contact, selectedConversation.channel) : "Chat"}
       >
         {selectedConversation ? (
           <div className="chat-actions">
@@ -2533,7 +2601,13 @@ function InboxView({
           {messages.map((message) => (
             <article className={`message-bubble ${message.direction}`} key={message.id}>
               <header>
-                <strong>{message.direction === "outbound" ? "Agente" : selectedConversation?.contact.fullName ?? "Cliente"}</strong>
+                <strong>
+                  {message.direction === "outbound"
+                    ? "Agente"
+                    : selectedConversation
+                      ? contactDisplayName(selectedConversation.contact, selectedConversation.channel)
+                      : "Cliente"}
+                </strong>
                 <time>{formatDate(message.createdAt)}</time>
               </header>
               <p>{message.text}</p>
@@ -2559,7 +2633,7 @@ function InboxView({
         {selectedConversation ? (
           <>
             <section className="context-block">
-              <h3>{selectedConversation.contact.fullName}</h3>
+              <h3>{contactDisplayName(selectedConversation.contact, selectedConversation.channel)}</h3>
               <p>{selectedConversation.contact.phone ?? "Sin telefono"}</p>
               <p>{selectedConversation.contact.email ?? "Sin email"}</p>
               <div className="tag-list">
@@ -2679,6 +2753,15 @@ function channelLabel(channel: string) {
     whatsapp: "WhatsApp"
   };
   return labels[channel] ?? channel;
+}
+
+function contactDisplayName(contact: Contact, channel?: string) {
+  const channelProfile = contact.channels?.find((item) => item.channel === channel);
+  if (channelProfile?.username && channelProfile.username !== channelProfile.externalId) {
+    return channelProfile.username.startsWith("@") ? channelProfile.username : `@${channelProfile.username}`;
+  }
+
+  return channelProfile?.displayName ?? contact.fullName;
 }
 
 function statusLabel(status: string) {

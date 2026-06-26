@@ -6,6 +6,7 @@ import { requireOrganization } from "../../shared/require-organization";
 import { requireRole } from "../../shared/require-role";
 import { ChannelConnectionsService } from "./channel-connections.service";
 import { CreateChannelConnectionDto } from "./dto/create-channel-connection.dto";
+import { UpdateChannelConnectionConfigDto } from "./dto/update-channel-connection-config.dto";
 import { UpdateChannelConnectionStatusDto } from "./dto/update-channel-connection-status.dto";
 
 @UseGuards(JwtAuthGuard)
@@ -37,5 +38,15 @@ export class ChannelConnectionsController {
   ) {
     requireRole(user, ["owner", "admin"]);
     return this.channelConnectionsService.updateStatus(requireOrganization(user), user.sub, id, dto);
+  }
+
+  @Patch(":id/config")
+  updateConfig(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Body() dto: UpdateChannelConnectionConfigDto
+  ) {
+    requireRole(user, ["owner", "admin"]);
+    return this.channelConnectionsService.updateConfig(requireOrganization(user), user.sub, id, dto);
   }
 }

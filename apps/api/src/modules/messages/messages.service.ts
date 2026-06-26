@@ -109,6 +109,7 @@ export class MessagesService {
       const recipient = this.getChannelRecipient(conversation, "instagram");
       if (recipient) {
         const result = await this.instagramCloud.sendText({
+          organizationId,
           text: dto.text,
           to: recipient
         });

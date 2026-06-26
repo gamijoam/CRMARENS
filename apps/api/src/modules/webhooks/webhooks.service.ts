@@ -69,10 +69,9 @@ export class WebhooksService implements OnModuleInit {
 
   async syncInstagramOnStartup() {
     const organizationId = this.config.get<string>("META_INSTAGRAM_ORGANIZATION_ID");
-    const accessToken = this.config.get<string>("META_INSTAGRAM_ACCESS_TOKEN");
 
-    if (!organizationId || !accessToken) {
-      this.logger.warn("Instagram startup sync skipped: organization id or access token is not configured");
+    if (!organizationId) {
+      this.logger.warn("Instagram startup sync skipped: organization id is not configured");
       return {
         processed: 0,
         skipped: 0,
@@ -89,6 +88,16 @@ export class WebhooksService implements OnModuleInit {
       orderBy: { createdAt: "asc" },
       select: { id: true }
     });
+    const accessToken = await this.getInstagramAccessToken(organizationId);
+
+    if (!accessToken) {
+      this.logger.warn("Instagram startup sync skipped: access token is not configured");
+      return {
+        processed: 0,
+        skipped: 0,
+        syncedConversations: 0
+      };
+    }
 
     const result = await this.syncRecentInstagramConversationHistories(organizationId, connection?.id, {
       object: "instagram"
@@ -199,7 +208,7 @@ export class WebhooksService implements OnModuleInit {
     const fallbackRefs = this.extractInstagramMessageLookupRefs(dto).filter(
       (ref) => !directMessages.some((message) => message.externalMessageId === ref.externalMessageId)
     );
-    const fallbackMessages = await this.fetchInstagramMessagesByIds(fallbackRefs);
+    const fallbackMessages = await this.fetchInstagramMessagesByIds(fallbackRefs, organizationId);
     const messages = [...directMessages, ...fallbackMessages];
     const technicalEvents = this.countInstagramTechnicalEvents(dto);
     let processed = 0;
@@ -236,7 +245,7 @@ export class WebhooksService implements OnModuleInit {
 
       await this.persistIncomingInstagramMessage(organizationId, connection?.id, message, dto);
       this.logger.log(`Instagram inbound message saved id=${message.externalMessageId} sender=${message.from}`);
-      await this.maybeSendInstagramAutoReply(message.from);
+      await this.maybeSendInstagramAutoReply(message.from, organizationId);
       processed += 1;
     }
 
@@ -280,7 +289,7 @@ export class WebhooksService implements OnModuleInit {
       throw new NotFoundException("META_INSTAGRAM_ORGANIZATION_ID is not configured");
     }
 
-    const graphMessages = await this.fetchInstagramConversationMessages(metaConversationId);
+    const graphMessages = await this.fetchInstagramConversationMessages(metaConversationId, organizationId);
     const latestSyncedAt = await this.getLatestSyncedInstagramConversationTime(organizationId, metaConversationId);
     const existingIds = new Set(
       (
@@ -295,7 +304,7 @@ export class WebhooksService implements OnModuleInit {
         .filter(Boolean) as string[]
     );
 
-    const ownIds = this.getInstagramOwnAccountIds();
+    const ownIds = await this.getInstagramOwnAccountIds(organizationId);
     const participant = this.pickInstagramConversationParticipant(graphMessages, ownIds);
     let processed = 0;
     let skipped = 0;
@@ -381,7 +390,7 @@ export class WebhooksService implements OnModuleInit {
     channelConnectionId: string | undefined,
     rawPayload: MetaInstagramWebhookDto
   ) {
-    const metaConversationIds = await this.fetchRecentInstagramConversationIds();
+    const metaConversationIds = await this.fetchRecentInstagramConversationIds(organizationId);
     let processed = 0;
     let skipped = 0;
     let syncedConversations = 0;
@@ -405,13 +414,13 @@ export class WebhooksService implements OnModuleInit {
     };
   }
 
-  private async maybeSendInstagramAutoReply(recipientId: string) {
+  private async maybeSendInstagramAutoReply(recipientId: string, organizationId: string) {
     const text = this.config.get<string>("META_INSTAGRAM_AUTO_REPLY_TEXT");
     if (!text) {
       return;
     }
 
-    const result = await this.sendInstagramTextMessage(recipientId, text);
+    const result = await this.sendInstagramTextMessage(recipientId, text, organizationId);
     if (result.ok) {
       this.logger.log(`Instagram auto reply sent to=${recipientId} messageId=${result.messageId ?? "unknown"}`);
       return;
@@ -420,8 +429,8 @@ export class WebhooksService implements OnModuleInit {
     this.logger.warn(`Instagram auto reply failed to=${recipientId} payload=${JSON.stringify(result.payload)}`);
   }
 
-  private async sendInstagramTextMessage(recipientId: string, text: string) {
-    const accessToken = this.config.get<string>("META_INSTAGRAM_ACCESS_TOKEN");
+  private async sendInstagramTextMessage(recipientId: string, text: string, organizationId: string) {
+    const accessToken = await this.getInstagramAccessToken(organizationId);
     const graphVersion = this.config.get<string>("META_INSTAGRAM_API_VERSION") ?? "v25.0";
 
     if (!accessToken) {
@@ -460,8 +469,8 @@ export class WebhooksService implements OnModuleInit {
     }
   }
 
-  private async fetchRecentInstagramConversationIds() {
-    const accessToken = this.config.get<string>("META_INSTAGRAM_ACCESS_TOKEN");
+  private async fetchRecentInstagramConversationIds(organizationId: string) {
+    const accessToken = await this.getInstagramAccessToken(organizationId);
     const graphVersion = this.config.get<string>("META_INSTAGRAM_API_VERSION") ?? "v25.0";
 
     if (!accessToken) {
@@ -489,8 +498,8 @@ export class WebhooksService implements OnModuleInit {
       .filter((id): id is string => typeof id === "string");
   }
 
-  private async fetchInstagramConversationMessages(metaConversationId: string) {
-    const accessToken = this.config.get<string>("META_INSTAGRAM_ACCESS_TOKEN");
+  private async fetchInstagramConversationMessages(metaConversationId: string, organizationId: string) {
+    const accessToken = await this.getInstagramAccessToken(organizationId);
     const graphVersion = this.config.get<string>("META_INSTAGRAM_API_VERSION") ?? "v25.0";
 
     if (!accessToken) {
@@ -538,7 +547,7 @@ export class WebhooksService implements OnModuleInit {
     });
   }
 
-  private async fetchInstagramMessagesByIds(refs: InstagramMessageLookupRef[]) {
+  private async fetchInstagramMessagesByIds(refs: InstagramMessageLookupRef[], organizationId: string) {
     const uniqueRefs = Array.from(
       refs.reduce((map, ref) => {
         if (!map.has(ref.externalMessageId)) {
@@ -551,7 +560,7 @@ export class WebhooksService implements OnModuleInit {
     const messages: IncomingInstagramMessage[] = [];
 
     for (const ref of uniqueRefs) {
-      const message = await this.fetchInstagramMessageById(ref.externalMessageId, ref.timestamp);
+      const message = await this.fetchInstagramMessageById(ref.externalMessageId, ref.timestamp, organizationId);
       if (message) {
         messages.push(message);
       }
@@ -560,8 +569,12 @@ export class WebhooksService implements OnModuleInit {
     return messages;
   }
 
-  private async fetchInstagramMessageById(externalMessageId: string, timestamp?: number | string) {
-    const accessToken = this.config.get<string>("META_INSTAGRAM_ACCESS_TOKEN");
+  private async fetchInstagramMessageById(
+    externalMessageId: string,
+    timestamp: number | string | undefined,
+    organizationId: string
+  ) {
+    const accessToken = await this.getInstagramAccessToken(organizationId);
     const graphVersion = this.config.get<string>("META_INSTAGRAM_API_VERSION") ?? "v25.0";
 
     if (!accessToken) {
@@ -634,9 +647,85 @@ export class WebhooksService implements OnModuleInit {
     );
   }
 
-  private getInstagramOwnAccountIds() {
+  private async fetchInstagramUserProfile(userId: string, organizationId: string) {
+    const accessToken = await this.getInstagramAccessToken(organizationId);
+    const graphVersion = this.config.get<string>("META_INSTAGRAM_API_VERSION") ?? "v25.0";
+
+    if (!accessToken) {
+      return undefined;
+    }
+
+    const fieldSets = ["name,username,profile_pic", "name,profile_pic"];
+
+    for (const fields of fieldSets) {
+      const url = new URL(`https://graph.facebook.com/${graphVersion}/${userId}`);
+      url.searchParams.set("fields", fields);
+
+      try {
+        const response = await fetch(url, {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        });
+        const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+        if (!response.ok) {
+          continue;
+        }
+
+        const name = typeof payload.name === "string" ? payload.name : undefined;
+        const username = typeof payload.username === "string" ? payload.username : undefined;
+
+        return {
+          displayName: username ? `@${username}` : name,
+          username
+        };
+      } catch (error) {
+        this.logger.warn(
+          `Instagram user profile lookup failed user=${userId} message=${
+            error instanceof Error ? error.message : "unknown"
+          }`
+        );
+        return undefined;
+      }
+    }
+
+    return undefined;
+  }
+
+  private async getInstagramAccessToken(organizationId: string) {
+    const connection = await this.getActiveInstagramConnectionConfig(organizationId);
+    return this.readConfigString(connection?.config, "accessToken") ?? this.config.get<string>("META_INSTAGRAM_ACCESS_TOKEN");
+  }
+
+  private getActiveInstagramConnectionConfig(organizationId: string) {
+    return this.prisma.channelConnection.findFirst({
+      where: {
+        organizationId,
+        channel: "instagram",
+        status: "active"
+      },
+      orderBy: { updatedAt: "desc" },
+      select: {
+        config: true,
+        externalAccountId: true
+      }
+    });
+  }
+
+  private readConfigString(config: unknown, key: string) {
+    if (!config || typeof config !== "object" || Array.isArray(config)) {
+      return undefined;
+    }
+
+    const value = (config as Record<string, unknown>)[key];
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  }
+
+  private async getInstagramOwnAccountIds(organizationId: string) {
+    const connection = await this.getActiveInstagramConnectionConfig(organizationId);
     return new Set(
       [
+        connection?.externalAccountId,
+        this.readConfigString(connection?.config, "instagramBusinessAccountId"),
         this.config.get<string>("META_INSTAGRAM_BUSINESS_ACCOUNT_ID"),
         this.config.get<string>("META_INSTAGRAM_PAGE_ID")
       ].filter((value): value is string => Boolean(value))
@@ -1202,24 +1291,69 @@ export class WebhooksService implements OnModuleInit {
           }
         }
       },
-      select: { id: true, fullName: true }
+      include: {
+        channels: {
+          where: {
+            channel: "instagram",
+            externalId: message.from
+          }
+        }
+      }
     });
 
     if (existingByChannel) {
-      return existingByChannel;
+      const channel = existingByChannel.channels[0];
+      const needsProfileLookup = !message.profileName && (!channel?.displayName || !channel.username);
+      const profile = needsProfileLookup ? await this.fetchInstagramUserProfile(message.from, organizationId) : undefined;
+      const displayName = profile?.displayName ?? message.profileName;
+      const username = profile?.username;
+      const shouldUpdateChannel = channel && (
+        (displayName && channel.displayName !== displayName) ||
+        (username && channel.username !== username)
+      );
+      const shouldUpdateContact = displayName && existingByChannel.fullName === `Instagram ${message.from}`;
+
+      if (shouldUpdateChannel || shouldUpdateContact) {
+        await this.prisma.$transaction(async (tx) => {
+          if (shouldUpdateContact) {
+            await tx.contact.update({
+              where: { id: existingByChannel.id },
+              data: { fullName: displayName }
+            });
+          }
+
+          if (shouldUpdateChannel) {
+            await tx.contactChannel.update({
+              where: { id: channel.id },
+              data: {
+                displayName: displayName ?? channel.displayName,
+                username: username ?? channel.username
+              }
+            });
+          }
+        });
+      }
+
+      return { id: existingByChannel.id, fullName: displayName ?? existingByChannel.fullName };
     }
+
+    const profile = message.profileName
+      ? { displayName: message.profileName, username: undefined as string | undefined }
+      : await this.fetchInstagramUserProfile(message.from, organizationId);
+    const displayName = profile?.displayName ?? message.profileName;
+    const username = profile?.username;
 
     return this.prisma.contact.create({
       data: {
-        fullName: message.profileName ?? `Instagram ${message.from}`,
+        fullName: displayName ?? username ?? `Instagram ${message.from}`,
         organizationId,
         tags: ["instagram"],
         channels: {
           create: {
-            displayName: message.profileName,
             channel: "instagram",
+            displayName,
             externalId: message.from,
-            username: message.from
+            username
           }
         }
       },

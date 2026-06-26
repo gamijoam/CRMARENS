@@ -1,7 +1,9 @@
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { PrismaService } from "../../prisma/prisma.service";
 
 interface SendTextInput {
+  organizationId: string;
   text: string;
   to: string;
 }
@@ -14,10 +16,13 @@ interface SendTextResult {
 
 @Injectable()
 export class InstagramCloudService {
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly prisma: PrismaService
+  ) {}
 
   async sendText(input: SendTextInput): Promise<SendTextResult> {
-    const accessToken = this.config.get<string>("META_INSTAGRAM_ACCESS_TOKEN");
+    const accessToken = await this.getAccessToken(input.organizationId);
     const instagramBusinessAccountId = this.config.get<string>("META_INSTAGRAM_BUSINESS_ACCOUNT_ID");
     const graphVersion = this.config.get<string>("META_INSTAGRAM_API_VERSION") ?? "v25.0";
     const authMode = this.config.get<string>("META_INSTAGRAM_AUTH_MODE") ?? "instagram_login";
@@ -80,5 +85,29 @@ export class InstagramCloudService {
         status: "failed"
       };
     }
+  }
+
+  private async getAccessToken(organizationId: string) {
+    const connection = await this.prisma.channelConnection.findFirst({
+      where: {
+        organizationId,
+        channel: "instagram",
+        status: "active"
+      },
+      orderBy: { updatedAt: "desc" },
+      select: { config: true }
+    });
+    const dbToken = this.readConfigString(connection?.config, "accessToken");
+
+    return dbToken ?? this.config.get<string>("META_INSTAGRAM_ACCESS_TOKEN");
+  }
+
+  private readConfigString(config: unknown, key: string) {
+    if (!config || typeof config !== "object" || Array.isArray(config)) {
+      return undefined;
+    }
+
+    const value = (config as Record<string, unknown>)[key];
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
   }
 }
