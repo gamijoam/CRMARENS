@@ -494,6 +494,18 @@ export function CrmApp() {
   }, [reportDays, selectedConversationId, token]);
 
   useEffect(() => {
+    if (!token || view !== "inbox" || !["owner", "admin"].includes(user?.role ?? "")) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void syncInstagramMessages({ silent: true });
+    }, 20000);
+
+    return () => window.clearInterval(interval);
+  }, [selectedConversationId, token, user?.role, view]);
+
+  useEffect(() => {
     if (!token || searchQuery.trim().length < 2) {
       setSearchResults(null);
       return;
@@ -846,6 +858,53 @@ export function CrmApp() {
     }
   }
 
+  async function syncInstagramMessages(options: { silent?: boolean } = {}) {
+    if (!token) {
+      return undefined;
+    }
+
+    if (!options.silent) {
+      setNotice("");
+    }
+
+    try {
+      const syncResult = await api<InstagramSyncResult>("/webhooks/meta/instagram/sync", {
+        method: "POST",
+        token,
+        body: JSON.stringify({})
+      });
+      await refreshData(token, { silent: options.silent });
+      if (selectedConversationId) {
+        const nextMessages = await api<Message[]>(`/conversations/${selectedConversationId}/messages`, { token });
+        setMessages(nextMessages);
+      }
+
+      if (!options.silent) {
+        setNotice(
+          `Sincronizacion: ${syncResult.syncedConversations} conversaciones, ${syncResult.processed} mensajes nuevos`
+        );
+      }
+
+      return syncResult;
+    } catch (error) {
+      if (!options.silent) {
+        setNotice(error instanceof Error ? error.message : "No se pudo sincronizar Instagram");
+      }
+      return undefined;
+    }
+  }
+
+  async function refreshWorkspace() {
+    if (view === "inbox" && ["owner", "admin"].includes(user?.role ?? "")) {
+      const syncResult = await syncInstagramMessages();
+      if (syncResult) {
+        return;
+      }
+    }
+
+    await refreshData();
+  }
+
   async function submitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formElement = event.currentTarget;
@@ -1083,7 +1142,7 @@ export function CrmApp() {
               onOpenChange={setNotificationsOpen}
               onSelect={openNotification}
             />
-            <button className="secondary-button" onClick={() => void refreshData()} type="button">
+            <button className="secondary-button" onClick={() => void refreshWorkspace()} type="button">
               {loading ? <Loader2 className="spin" size={18} /> : <CircleDot size={18} />}
               Actualizar
             </button>
