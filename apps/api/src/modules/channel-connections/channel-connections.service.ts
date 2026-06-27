@@ -111,16 +111,17 @@ export class ChannelConnectionsService {
     const currentConfig = this.asConfigRecord(currentConnection.config);
     const trimmedAccessToken = dto.accessToken?.trim();
     const tokenHealth = trimmedAccessToken
-      ? await this.validateInstagramAccessToken(trimmedAccessToken)
+      ? await this.validateMetaPageAccessToken(trimmedAccessToken)
       : undefined;
+    const healthKey = currentConnection.channel === "messenger" ? "facebookHealth" : "instagramHealth";
     const nextConfig = {
       ...currentConfig,
       ...(trimmedAccessToken
         ? {
             accessToken: trimmedAccessToken,
             accessTokenUpdatedAt: new Date().toISOString(),
-            instagramHealth: {
-              ...this.asConfigRecord(currentConfig.instagramHealth),
+            [healthKey]: {
+              ...this.asConfigRecord(currentConfig[healthKey]),
               tokenCheckedAt: new Date().toISOString(),
               tokenError: tokenHealth?.error,
               tokenPageId: tokenHealth?.pageId,
@@ -161,13 +162,16 @@ export class ChannelConnectionsService {
     const currentConfig = this.asConfigRecord(currentConnection.config);
 
     if (currentConnection.channel !== "instagram") {
-      throw new ConflictException("Connection test is only available for Instagram right now");
+      if (currentConnection.channel !== "messenger") {
+        throw new ConflictException("Connection test is only available for Meta messaging channels right now");
+      }
     }
 
     const accessToken = typeof currentConfig.accessToken === "string" ? currentConfig.accessToken.trim() : "";
     const checkedAt = new Date().toISOString();
+    const healthKey = currentConnection.channel === "messenger" ? "facebookHealth" : "instagramHealth";
     const tokenHealth = accessToken
-      ? await this.validateInstagramAccessToken(accessToken)
+      ? await this.validateMetaPageAccessToken(accessToken)
       : { error: "No access token configured", status: "invalid" };
 
     const connection = await this.prisma.channelConnection.update({
@@ -175,8 +179,8 @@ export class ChannelConnectionsService {
       data: {
         config: {
           ...currentConfig,
-          instagramHealth: {
-            ...this.asConfigRecord(currentConfig.instagramHealth),
+          [healthKey]: {
+            ...this.asConfigRecord(currentConfig[healthKey]),
             lastConnectionTestAt: checkedAt,
             tokenCheckedAt: checkedAt,
             tokenError: tokenHealth.error,
@@ -249,8 +253,8 @@ export class ChannelConnectionsService {
     return `${value.slice(0, 4)}...${value.slice(-4)}`;
   }
 
-  private async validateInstagramAccessToken(accessToken: string) {
-    const graphVersion = this.config.get<string>("META_INSTAGRAM_API_VERSION") ?? "v25.0";
+  private async validateMetaPageAccessToken(accessToken: string) {
+    const graphVersion = this.config.get<string>("META_GRAPH_API_VERSION") ?? "v25.0";
     const url = new URL(`https://graph.facebook.com/${graphVersion}/me`);
     url.searchParams.set("fields", "id,name,instagram_business_account");
 

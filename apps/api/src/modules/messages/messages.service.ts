@@ -7,6 +7,7 @@ import { AuditLogsService } from "../audit-logs/audit-logs.service";
 import { CreateMessageDto } from "./dto/create-message.dto";
 import { UpdateMessageStatusDto } from "./dto/update-message-status.dto";
 import { InstagramCloudService } from "./instagram-cloud.service";
+import { MessengerCloudService } from "./messenger-cloud.service";
 import { WhatsappCloudService } from "./whatsapp-cloud.service";
 
 @Injectable()
@@ -15,6 +16,7 @@ export class MessagesService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly instagramCloud: InstagramCloudService,
+    private readonly messengerCloud: MessengerCloudService,
     private readonly whatsappCloud: WhatsappCloudService
   ) {}
 
@@ -141,6 +143,42 @@ export class MessagesService {
       });
     }
 
+    if (dto.direction === "outbound" && conversation.channel === "messenger" && dto.text) {
+      const recipient = this.getChannelRecipient(conversation, "messenger");
+      if (recipient) {
+        const result = await this.messengerCloud.sendText({
+          organizationId,
+          text: dto.text,
+          to: recipient
+        });
+
+        return this.prisma.message.update({
+          where: { id: message.id },
+          data: {
+            externalMessageId: result.externalMessageId ?? message.externalMessageId,
+            rawPayload: {
+              ...(dto.rawPayload ?? {}),
+              messengerCloud: result.rawPayload
+            } as Prisma.InputJsonValue,
+            status: result.status
+          },
+          include: this.messageInclude()
+        });
+      }
+
+      return this.prisma.message.update({
+        where: { id: message.id },
+        data: {
+          rawPayload: {
+            ...(dto.rawPayload ?? {}),
+            messengerCloud: { error: "missing_messenger_recipient" }
+          } as Prisma.InputJsonValue,
+          status: "failed"
+        },
+        include: this.messageInclude()
+      });
+    }
+
     return message;
   }
 
@@ -223,6 +261,23 @@ export class MessagesService {
         });
       }
       providerKey = "whatsappCloudRetry";
+    }
+
+    if (conversation.channel === "messenger") {
+      const recipient = this.getChannelRecipient(conversation, "messenger");
+      if (!recipient) {
+        result = {
+          rawPayload: { error: "missing_messenger_recipient" },
+          status: "failed"
+        };
+      } else {
+        result = await this.messengerCloud.sendText({
+          organizationId,
+          text: message.text,
+          to: recipient
+        });
+      }
+      providerKey = "messengerCloudRetry";
     }
 
     if (!result) {
@@ -316,7 +371,7 @@ export class MessagesService {
           select: {
             phone: true,
             channels: {
-              where: { channel: { in: ["instagram", "whatsapp"] } },
+              where: { channel: { in: ["instagram", "messenger", "whatsapp"] } },
               select: { channel: true, externalId: true }
             }
           }

@@ -201,6 +201,7 @@ interface ChannelConnection {
     accessTokenConfigured?: boolean;
     accessTokenPreview?: string;
     accessTokenUpdatedAt?: string;
+    facebookHealth?: Record<string, unknown>;
     instagramHealth?: Record<string, unknown>;
     [key: string]: unknown;
   };
@@ -2179,7 +2180,7 @@ function ChannelsView({
   onUpdateStatus: (connectionId: string, status: "active" | "inactive") => void;
 }) {
   const canManage = ["owner", "admin"].includes(currentUser.role);
-  const instagramConnections = connections.filter((connection) => connection.channel === "instagram");
+  const metaConnections = connections.filter((connection) => ["instagram", "messenger"].includes(connection.channel));
   const channelTotals = connections.reduce<Record<string, number>>((totals, connection) => {
     totals[connection.channel] = (totals[connection.channel] ?? 0) + 1;
     return totals;
@@ -2216,9 +2217,9 @@ function ChannelsView({
       </Panel>
 
       {canManage ? (
-        <Panel className="wide-panel" title="Token de Instagram" eyebrow="Admin">
+        <Panel className="wide-panel" title="Tokens Meta" eyebrow="Admin">
           <div className="settings-list">
-            {instagramConnections.map((connection) => (
+            {metaConnections.map((connection) => (
               <form
                 className="settings-card"
                 key={connection.id}
@@ -2231,17 +2232,23 @@ function ChannelsView({
                       ? `Token guardado ${connection.config.accessTokenPreview ?? ""}`
                       : "Sin token guardado"}
                   </span>
-                  <InstagramHealthPanel health={connection.config?.instagramHealth} />
+                  <InstagramHealthPanel
+                    health={
+                      connection.channel === "messenger"
+                        ? connection.config?.facebookHealth
+                        : connection.config?.instagramHealth
+                    }
+                  />
                 </div>
                 <input
                   name="externalAccountId"
-                  placeholder="ID cuenta Instagram / Page ID"
+                  placeholder={connection.channel === "messenger" ? "Page ID de Facebook" : "ID cuenta Instagram / Page ID"}
                   defaultValue={connection.externalAccountId ?? ""}
                 />
                 <input
                   autoComplete="off"
                   name="accessToken"
-                  placeholder="Pega aqui el Page Access Token nuevo"
+                  placeholder={`Pega aqui el Page Access Token de ${channelLabel(connection.channel)}`}
                   type="password"
                 />
                 <button className="primary-button" type="submit">
@@ -2256,8 +2263,8 @@ function ChannelsView({
                 </button>
               </form>
             ))}
-            {!instagramConnections.length ? (
-              <p className="muted-text">Crea una conexion de Instagram para guardar el token.</p>
+            {!metaConnections.length ? (
+              <p className="muted-text">Crea una conexion de Instagram o Messenger para guardar el token.</p>
             ) : null}
           </div>
         </Panel>

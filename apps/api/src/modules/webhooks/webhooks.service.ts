@@ -31,6 +31,14 @@ interface IncomingInstagramMessage {
   timestamp?: number | string;
 }
 
+interface IncomingMessengerMessage {
+  externalMessageId: string;
+  from: string;
+  profileName?: string;
+  text: string;
+  timestamp?: number | string;
+}
+
 interface InstagramMessageLookupRef {
   externalMessageId: string;
   timestamp?: number | string;
@@ -372,6 +380,77 @@ export class WebhooksService implements OnModuleInit {
       received: messages.length,
       skipped,
       syncedFromGraph
+    };
+  }
+
+  async receiveMetaFacebook(dto: MetaInstagramWebhookDto) {
+    const organizationId =
+      this.config.get<string>("META_FACEBOOK_ORGANIZATION_ID") ??
+      this.config.get<string>("META_INSTAGRAM_ORGANIZATION_ID");
+    if (!organizationId) {
+      throw new NotFoundException("META_FACEBOOK_ORGANIZATION_ID is not configured");
+    }
+
+    const [organization, connection] = await Promise.all([
+      this.prisma.organization.findUnique({
+        where: { id: organizationId },
+        select: { id: true }
+      }),
+      this.prisma.channelConnection.findFirst({
+        where: {
+          organizationId,
+          channel: "messenger",
+          status: "active"
+        },
+        orderBy: { createdAt: "asc" },
+        select: { id: true, name: true }
+      })
+    ]);
+
+    if (!organization) {
+      throw new NotFoundException(`META_FACEBOOK_ORGANIZATION_ID does not exist: ${organizationId}`);
+    }
+
+    if (!connection) {
+      this.logger.warn(`Facebook webhook has no active Messenger connection for organization=${organizationId}`);
+    }
+
+    const messages = this.extractMessengerMessages(dto);
+    let processed = 0;
+    let skipped = 0;
+
+    this.logger.log(
+      `Facebook webhook received=${messages.length} object=${dto.object ?? "unknown"} connection=${connection?.name ?? "none"}`
+    );
+
+    for (const message of messages) {
+      const existingMessage = await this.prisma.message.findFirst({
+        where: {
+          channel: "messenger",
+          conversation: { organizationId },
+          externalMessageId: message.externalMessageId
+        },
+        select: { id: true }
+      });
+      if (existingMessage) {
+        skipped += 1;
+        continue;
+      }
+
+      const savedMessage = await this.persistIncomingMessengerMessage(organizationId, connection?.id, message, dto);
+      if (!savedMessage) {
+        skipped += 1;
+        continue;
+      }
+
+      this.logger.log(`Facebook Messenger inbound message saved id=${message.externalMessageId} sender=${message.from}`);
+      processed += 1;
+    }
+
+    return {
+      processed,
+      received: messages.length,
+      skipped
     };
   }
 
@@ -959,6 +1038,41 @@ export class WebhooksService implements OnModuleInit {
     return messages;
   }
 
+  private extractMessengerMessages(dto: MetaInstagramWebhookDto) {
+    const messages: IncomingMessengerMessage[] = [];
+
+    for (const entry of dto.entry ?? []) {
+      for (const event of entry.messaging ?? []) {
+        const rawEvent = event as unknown as Record<string, unknown>;
+        if (this.isMessengerTechnicalEvent(rawEvent)) {
+          continue;
+        }
+
+        const sender = this.asRecord(rawEvent.sender);
+        const message = this.asRecord(rawEvent.message);
+        const senderId = typeof sender?.id === "string" ? sender.id : undefined;
+        const externalMessageId = typeof message?.mid === "string" ? message.mid : undefined;
+        const text = typeof message?.text === "string" ? message.text : undefined;
+
+        if (!senderId || !externalMessageId || !text) {
+          continue;
+        }
+
+        messages.push({
+          externalMessageId,
+          from: senderId,
+          text,
+          timestamp:
+            typeof rawEvent.timestamp === "number" || typeof rawEvent.timestamp === "string"
+              ? rawEvent.timestamp
+              : undefined
+        });
+      }
+    }
+
+    return messages;
+  }
+
   private extractInstagramMessageLookupRefs(dto: MetaInstagramWebhookDto) {
     const refs: InstagramMessageLookupRef[] = [];
 
@@ -1095,6 +1209,12 @@ export class WebhooksService implements OnModuleInit {
       "reaction",
       "standby"
     ].some((field) => Boolean(this.asRecord(value[field])));
+  }
+
+  private isMessengerTechnicalEvent(value: Record<string, unknown>) {
+    return ["delivery", "optin", "postback", "read", "reaction", "standby"].some((field) =>
+      Boolean(this.asRecord(value[field]))
+    );
   }
 
   private asRecord(value: unknown) {
@@ -1277,6 +1397,61 @@ export class WebhooksService implements OnModuleInit {
     return savedMessage;
   }
 
+  private async persistIncomingMessengerMessage(
+    organizationId: string,
+    channelConnectionId: string | undefined,
+    message: IncomingMessengerMessage,
+    rawPayload: MetaInstagramWebhookDto
+  ) {
+    const createdAt = this.parseInstagramTimestamp(message.timestamp);
+    const contact = await this.findOrCreateMessengerContact(organizationId, message);
+    const conversation = await this.findOrCreateChannelConversation(
+      organizationId,
+      contact.id,
+      "messenger",
+      channelConnectionId,
+      createdAt
+    );
+
+    const savedMessage = await this.createChannelMessageIdempotently(
+      conversation.id,
+      {
+        channel: "messenger",
+        conversationId: conversation.id,
+        createdAt,
+        direction: "inbound",
+        externalMessageId: message.externalMessageId,
+        rawPayload: rawPayload as Prisma.InputJsonValue,
+        status: "delivered",
+        text: message.text,
+        type: "text"
+      },
+      createdAt
+    );
+
+    if (!savedMessage) {
+      this.logger.log(`Facebook Messenger webhook skipped duplicate id=${message.externalMessageId}`);
+      return undefined;
+    }
+
+    await this.auditLogs.create({
+      action: "message.inbound",
+      entityId: savedMessage.id,
+      entityType: "message",
+      metadata: {
+        assignedUserId: conversation.assignedUserId,
+        channel: "messenger",
+        contactId: contact.id,
+        conversationId: conversation.id,
+        externalMessageId: message.externalMessageId,
+        source: "meta.facebook.webhook"
+      },
+      organizationId
+    });
+
+    return savedMessage;
+  }
+
   private async persistInstagramGraphMessage(
     organizationId: string,
     channelConnectionId: string | undefined,
@@ -1335,6 +1510,34 @@ export class WebhooksService implements OnModuleInit {
   }
 
   private async createInstagramMessageIdempotently(
+    conversationId: string,
+    data: Prisma.MessageUncheckedCreateInput,
+    createdAt: Date
+  ) {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const nextMessage = await tx.message.create({ data });
+
+        await tx.conversation.update({
+          where: { id: conversationId },
+          data: {
+            lastMessageAt: createdAt,
+            status: "open"
+          }
+        });
+
+        return nextMessage;
+      });
+    } catch (error) {
+      if (this.isPrismaUniqueConstraintError(error)) {
+        return undefined;
+      }
+
+      throw error;
+    }
+  }
+
+  private async createChannelMessageIdempotently(
     conversationId: string,
     data: Prisma.MessageUncheckedCreateInput,
     createdAt: Date
@@ -1525,6 +1728,41 @@ export class WebhooksService implements OnModuleInit {
             displayName,
             externalId: message.from,
             username
+          }
+        }
+      },
+      select: { id: true, fullName: true }
+    });
+  }
+
+  private async findOrCreateMessengerContact(organizationId: string, message: IncomingMessengerMessage) {
+    const existingByChannel = await this.prisma.contact.findFirst({
+      where: {
+        organizationId,
+        channels: {
+          some: {
+            channel: "messenger",
+            externalId: message.from
+          }
+        }
+      },
+      select: { id: true, fullName: true }
+    });
+
+    if (existingByChannel) {
+      return existingByChannel;
+    }
+
+    return this.prisma.contact.create({
+      data: {
+        fullName: message.profileName ?? `Facebook ${message.from}`,
+        organizationId,
+        tags: ["messenger"],
+        channels: {
+          create: {
+            channel: "messenger",
+            displayName: message.profileName,
+            externalId: message.from
           }
         }
       },
