@@ -2,7 +2,7 @@ import { WebhooksService } from "./webhooks.service";
 
 describe("WebhooksService Instagram parsing", () => {
   function createService() {
-    return new WebhooksService({} as never, {} as never, {} as never);
+    return new WebhooksService({} as never, {} as never, {} as never, { emitToOrganization: jest.fn() } as never);
   }
 
   it("extracts text messages from Instagram messaging payloads", () => {

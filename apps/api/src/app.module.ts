@@ -14,6 +14,7 @@ import { NotificationsModule } from "./modules/notifications/notifications.modul
 import { OrganizationsModule } from "./modules/organizations/organizations.module";
 import { PipelinesModule } from "./modules/pipelines/pipelines.module";
 import { ReportsModule } from "./modules/reports/reports.module";
+import { RealtimeModule } from "./modules/realtime/realtime.module";
 import { SearchModule } from "./modules/search/search.module";
 import { TasksModule } from "./modules/tasks/tasks.module";
 import { UsersModule } from "./modules/users/users.module";
@@ -40,6 +41,7 @@ import { PrismaModule } from "./prisma/prisma.module";
     DashboardModule,
     NotificationsModule,
     ReportsModule,
+    RealtimeModule,
     SearchModule,
     WebhooksModule
   ]

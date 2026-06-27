@@ -3,6 +3,7 @@ import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditLogsService } from "../audit-logs/audit-logs.service";
+import { RealtimeService } from "../realtime/realtime.service";
 import { MetaInstagramWebhookDto } from "./dto/meta-instagram-webhook.dto";
 import { MetaWhatsAppWebhookDto } from "./dto/meta-whatsapp-webhook.dto";
 
@@ -71,7 +72,8 @@ export class WebhooksService implements OnModuleInit {
   constructor(
     private readonly auditLogs: AuditLogsService,
     private readonly config: ConfigService,
-    private readonly prisma: PrismaService
+    private readonly prisma: PrismaService,
+    private readonly realtime: RealtimeService
   ) {}
 
   onModuleInit() {
@@ -348,6 +350,7 @@ export class WebhooksService implements OnModuleInit {
         continue;
       }
 
+      this.emitMessageCreated(organizationId, savedMessage.conversationId, savedMessage.id, "instagram");
       this.logger.log(`Instagram inbound message saved id=${message.externalMessageId} sender=${message.from}`);
       await this.maybeSendInstagramAutoReply(message.from, organizationId);
       processed += 1;
@@ -443,6 +446,7 @@ export class WebhooksService implements OnModuleInit {
         continue;
       }
 
+      this.emitMessageCreated(organizationId, savedMessage.conversationId, savedMessage.id, "messenger");
       this.logger.log(`Facebook Messenger inbound message saved id=${message.externalMessageId} sender=${message.from}`);
       processed += 1;
     }
@@ -520,6 +524,7 @@ export class WebhooksService implements OnModuleInit {
         } as unknown as Prisma.InputJsonValue
       );
       if (savedMessage) {
+        this.emitMessageCreated(organizationId, savedMessage.conversationId, savedMessage.id, "instagram");
         processed += 1;
       } else {
         skipped += 1;
@@ -1878,5 +1883,15 @@ export class WebhooksService implements OnModuleInit {
     }
 
     return "sent";
+  }
+
+  private emitMessageCreated(organizationId: string, conversationId: string, messageId: string, channel: string) {
+    this.realtime.emitToOrganization({
+      channel,
+      conversationId,
+      messageId,
+      organizationId,
+      type: "message.created"
+    });
   }
 }

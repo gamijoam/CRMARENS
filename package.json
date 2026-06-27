@@ -27,5 +27,8 @@
     "@nestjs/platform-express": "11.1.27",
     "multer": "2.2.0",
     "postcss": "8.5.15"
+  },
+  "dependencies": {
+    "ws": "^8.21.0"
   }
 }

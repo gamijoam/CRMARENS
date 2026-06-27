@@ -4,6 +4,7 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { canViewTeamData } from "../../shared/access-policy";
 import { AuthenticatedUser } from "../../shared/authenticated-user";
 import { AuditLogsService } from "../audit-logs/audit-logs.service";
+import { RealtimeService } from "../realtime/realtime.service";
 import { CreateMessageDto } from "./dto/create-message.dto";
 import { UpdateMessageStatusDto } from "./dto/update-message-status.dto";
 import { InstagramCloudService } from "./instagram-cloud.service";
@@ -17,6 +18,7 @@ export class MessagesService {
     private readonly auditLogs: AuditLogsService,
     private readonly instagramCloud: InstagramCloudService,
     private readonly messengerCloud: MessengerCloudService,
+    private readonly realtime: RealtimeService,
     private readonly whatsappCloud: WhatsappCloudService
   ) {}
 
@@ -80,7 +82,7 @@ export class MessagesService {
           to: recipient
         });
 
-        return this.prisma.message.update({
+        const updatedMessage = await this.prisma.message.update({
           where: { id: message.id },
           data: {
             externalMessageId: result.externalMessageId ?? message.externalMessageId,
@@ -92,9 +94,11 @@ export class MessagesService {
           },
           include: this.messageInclude()
         });
+        this.emitMessageCreated(organizationId, conversation.id, updatedMessage.id, conversation.channel);
+        return updatedMessage;
       }
 
-      return this.prisma.message.update({
+      const failedMessage = await this.prisma.message.update({
         where: { id: message.id },
         data: {
           rawPayload: {
@@ -105,6 +109,8 @@ export class MessagesService {
         },
         include: this.messageInclude()
       });
+      this.emitMessageCreated(organizationId, conversation.id, failedMessage.id, conversation.channel);
+      return failedMessage;
     }
 
     if (dto.direction === "outbound" && conversation.channel === "instagram" && dto.text) {
@@ -116,7 +122,7 @@ export class MessagesService {
           to: recipient
         });
 
-        return this.prisma.message.update({
+        const updatedMessage = await this.prisma.message.update({
           where: { id: message.id },
           data: {
             externalMessageId: result.externalMessageId ?? message.externalMessageId,
@@ -128,9 +134,11 @@ export class MessagesService {
           },
           include: this.messageInclude()
         });
+        this.emitMessageCreated(organizationId, conversation.id, updatedMessage.id, conversation.channel);
+        return updatedMessage;
       }
 
-      return this.prisma.message.update({
+      const failedMessage = await this.prisma.message.update({
         where: { id: message.id },
         data: {
           rawPayload: {
@@ -141,6 +149,8 @@ export class MessagesService {
         },
         include: this.messageInclude()
       });
+      this.emitMessageCreated(organizationId, conversation.id, failedMessage.id, conversation.channel);
+      return failedMessage;
     }
 
     if (dto.direction === "outbound" && conversation.channel === "messenger" && dto.text) {
@@ -152,7 +162,7 @@ export class MessagesService {
           to: recipient
         });
 
-        return this.prisma.message.update({
+        const updatedMessage = await this.prisma.message.update({
           where: { id: message.id },
           data: {
             externalMessageId: result.externalMessageId ?? message.externalMessageId,
@@ -164,9 +174,11 @@ export class MessagesService {
           },
           include: this.messageInclude()
         });
+        this.emitMessageCreated(organizationId, conversation.id, updatedMessage.id, conversation.channel);
+        return updatedMessage;
       }
 
-      return this.prisma.message.update({
+      const failedMessage = await this.prisma.message.update({
         where: { id: message.id },
         data: {
           rawPayload: {
@@ -177,8 +189,11 @@ export class MessagesService {
         },
         include: this.messageInclude()
       });
+      this.emitMessageCreated(organizationId, conversation.id, failedMessage.id, conversation.channel);
+      return failedMessage;
     }
 
+    this.emitMessageCreated(organizationId, conversation.id, message.id, conversation.channel);
     return message;
   }
 
@@ -393,6 +408,16 @@ export class MessagesService {
     channel: string
   ) {
     return conversation.contact.channels.find((item) => item.channel === channel)?.externalId;
+  }
+
+  private emitMessageCreated(organizationId: string, conversationId: string, messageId: string, channel: string) {
+    this.realtime.emitToOrganization({
+      channel,
+      conversationId,
+      messageId,
+      organizationId,
+      type: "message.created"
+    });
   }
 
   private asPayloadRecord(payload: Prisma.JsonValue | null) {

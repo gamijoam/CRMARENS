@@ -151,6 +151,14 @@ interface Message {
   createdAt: string;
 }
 
+interface RealtimeEvent {
+  channel?: string;
+  conversationId?: string;
+  messageId?: string;
+  organizationId?: string;
+  type: "connected" | "message.created" | "conversation.updated" | "sync.completed";
+}
+
 interface TeamMember {
   id: string;
   name: string;
@@ -371,6 +379,9 @@ interface ReportSummary {
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
+const WS_URL =
+  process.env.NEXT_PUBLIC_WS_URL ??
+  API_URL.replace(/^http/, "ws").replace(/\/api$/, "/realtime");
 
 const primaryNavItems: Array<{ id: View; label: string; icon: typeof Inbox }> = [
   { id: "inbox", label: "Inbox", icon: Inbox },
@@ -450,6 +461,48 @@ export function CrmApp() {
   }, [selectedConversationId, token]);
 
   useEffect(() => {
+    if (!token) {
+      return;
+    }
+
+    let reconnectTimer: number | undefined;
+    let closedByEffect = false;
+
+    const connect = () => {
+      const socket = new WebSocket(`${WS_URL}?token=${encodeURIComponent(token)}`);
+
+      socket.onmessage = (event) => {
+        const payload = parseRealtimeEvent(event.data);
+        if (!payload || payload.type === "connected") {
+          return;
+        }
+
+        void refreshData(token, { silent: true });
+        if (payload.conversationId && payload.conversationId === selectedConversationId) {
+          void api<Message[]>(`/conversations/${selectedConversationId}/messages`, { token })
+            .then(setMessages)
+            .catch(() => undefined);
+        }
+      };
+
+      socket.onclose = () => {
+        if (!closedByEffect) {
+          reconnectTimer = window.setTimeout(connect, 3000);
+        }
+      };
+    };
+
+    connect();
+
+    return () => {
+      closedByEffect = true;
+      if (reconnectTimer) {
+        window.clearTimeout(reconnectTimer);
+      }
+    };
+  }, [selectedConversationId, token]);
+
+  useEffect(() => {
     if (!selectedConversationId) {
       return;
     }
@@ -488,35 +541,6 @@ export function CrmApp() {
       }
     }
   }, [conversations, selectedConversationId]);
-
-  useEffect(() => {
-    if (!token) {
-      return;
-    }
-
-    const interval = window.setInterval(() => {
-      void refreshData(token, { silent: true });
-      if (selectedConversationId) {
-        void api<Message[]>(`/conversations/${selectedConversationId}/messages`, { token })
-          .then(setMessages)
-          .catch(() => undefined);
-      }
-    }, 30000);
-
-    return () => window.clearInterval(interval);
-  }, [reportDays, selectedConversationId, token]);
-
-  useEffect(() => {
-    if (!token || view !== "inbox" || !["owner", "admin"].includes(user?.role ?? "")) {
-      return;
-    }
-
-    const interval = window.setInterval(() => {
-      void syncInstagramMessages({ silent: true });
-    }, 120000);
-
-    return () => window.clearInterval(interval);
-  }, [selectedConversationId, token, user?.role, view]);
 
   useEffect(() => {
     if (!token || searchQuery.trim().length < 2) {
@@ -2913,6 +2937,15 @@ function formatDate(value?: string) {
     minute: "2-digit",
     month: "short"
   }).format(new Date(value));
+}
+
+function parseRealtimeEvent(value: string) {
+  try {
+    const parsed = JSON.parse(value) as RealtimeEvent;
+    return parsed?.type ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function providerErrorMessage(rawPayload?: Record<string, unknown>) {
