@@ -44,7 +44,7 @@ export class InstagramCloudService {
         authMode === "facebook_login"
           ? `https://graph.facebook.com/${graphVersion}/me/messages`
           : `https://graph.instagram.com/${graphVersion}/me/messages`;
-      const response = await fetch(
+      const response = await this.fetchWithRetry(
         url,
         {
           method: "POST",
@@ -80,10 +80,23 @@ export class InstagramCloudService {
     } catch (error) {
       return {
         rawPayload: {
-          error: error instanceof Error ? error.message : "Unknown Instagram API error"
+          error: this.formatFetchError(error)
         },
         status: "failed"
       };
+    }
+  }
+
+  private async fetchWithRetry(url: string, init: RequestInit) {
+    try {
+      return await fetch(url, init);
+    } catch (error) {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      try {
+        return await fetch(url, init);
+      } catch (retryError) {
+        throw retryError instanceof Error ? retryError : error;
+      }
     }
   }
 
@@ -109,5 +122,14 @@ export class InstagramCloudService {
 
     const value = (config as Record<string, unknown>)[key];
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  }
+
+  private formatFetchError(error: unknown) {
+    if (!(error instanceof Error)) {
+      return "Unknown Instagram API error";
+    }
+
+    const cause = error.cause instanceof Error ? `: ${error.cause.message}` : "";
+    return `${error.message}${cause}`;
   }
 }

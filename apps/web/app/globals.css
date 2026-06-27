@@ -1399,8 +1399,16 @@ textarea:focus {
 .message-footer {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   justify-content: space-between;
+}
+
+.message-footer small {
+  flex-basis: 100%;
+  font-size: 11px;
+  line-height: 1.35;
+  opacity: 0.82;
 }
 
 .retry-button {

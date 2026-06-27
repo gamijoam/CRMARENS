@@ -144,6 +144,7 @@ interface Message {
   id: string;
   direction: "inbound" | "outbound";
   channel: string;
+  rawPayload?: Record<string, unknown>;
   text?: string;
   type: string;
   status: string;
@@ -500,7 +501,7 @@ export function CrmApp() {
           .then(setMessages)
           .catch(() => undefined);
       }
-    }, 8000);
+    }, 30000);
 
     return () => window.clearInterval(interval);
   }, [reportDays, selectedConversationId, token]);
@@ -512,7 +513,7 @@ export function CrmApp() {
 
     const interval = window.setInterval(() => {
       void syncInstagramMessages({ silent: true });
-    }, 20000);
+    }, 120000);
 
     return () => window.clearInterval(interval);
   }, [selectedConversationId, token, user?.role, view]);
@@ -931,13 +932,24 @@ export function CrmApp() {
       return;
     }
     const form = new FormData(formElement);
-    await mutate(`/conversations/${selectedConversationId}/messages`, {
-      direction: "outbound",
-      type: "text",
-      text: form.get("text")
+    setNotice("");
+    const savedMessage = await api<Message>(`/conversations/${selectedConversationId}/messages`, {
+      method: "POST",
+      token,
+      body: JSON.stringify({
+        direction: "outbound",
+        type: "text",
+        text: form.get("text")
+      })
     });
     const nextMessages = await api<Message[]>(`/conversations/${selectedConversationId}/messages`, { token });
     setMessages(nextMessages);
+    if (savedMessage.status === "failed") {
+      setNotice(providerErrorMessage(savedMessage.rawPayload) ?? "Meta rechazo el envio. Revisa permisos o ventana de respuesta.");
+      return;
+    }
+
+    setNotice("Mensaje enviado");
     formElement.reset();
   }
 
@@ -2803,6 +2815,9 @@ function InboxView({
               <footer className="message-footer">
                 <span>{message.status}</span>
                 {message.direction === "outbound" && message.status === "failed" ? (
+                  <small>{providerErrorMessage(message.rawPayload) ?? "No enviado"}</small>
+                ) : null}
+                {message.direction === "outbound" && message.status === "failed" ? (
                   <button
                     className="retry-button"
                     onClick={() => void onRetryMessage(message.id)}
@@ -2898,6 +2913,33 @@ function formatDate(value?: string) {
     minute: "2-digit",
     month: "short"
   }).format(new Date(value));
+}
+
+function providerErrorMessage(rawPayload?: Record<string, unknown>) {
+  const providers = ["instagramCloud", "messengerCloud", "whatsappCloud", "instagramCloudRetry", "messengerCloudRetry"];
+  for (const provider of providers) {
+    const payload = rawPayload?.[provider];
+    const record = asPlainRecord(payload);
+    const nestedPayload = asPlainRecord(record?.payload);
+    const errorSource = asPlainRecord(record?.error) ?? asPlainRecord(nestedPayload?.error);
+    const message = typeof errorSource?.message === "string" ? errorSource.message : undefined;
+    if (message) {
+      return message;
+    }
+
+    const stringError = typeof record?.error === "string" ? record.error : undefined;
+    if (stringError) {
+      return stringError;
+    }
+  }
+
+  return undefined;
+}
+
+function asPlainRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 
 function formatMoney(value: number) {
