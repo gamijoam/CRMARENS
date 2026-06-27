@@ -155,6 +155,112 @@ export class MessagesService {
     });
   }
 
+  async retry(
+    organizationId: string,
+    user: AuthenticatedUser,
+    conversationId: string,
+    messageId: string
+  ) {
+    const conversation = await this.ensureConversationExists(organizationId, user, conversationId);
+    const message = await this.prisma.message.findFirst({
+      where: {
+        id: messageId,
+        conversationId,
+        direction: "outbound",
+        status: "failed",
+        type: "text"
+      },
+      select: {
+        externalMessageId: true,
+        id: true,
+        rawPayload: true,
+        text: true
+      }
+    });
+
+    if (!message) {
+      throw new NotFoundException("Failed outbound message not found");
+    }
+
+    if (!message.text) {
+      throw new BadRequestException("Only text messages can be retried right now");
+    }
+
+    const rawPayload = this.asPayloadRecord(message.rawPayload);
+    let result:
+      | { externalMessageId?: string; rawPayload: Record<string, unknown>; status: "failed" | "sent" }
+      | undefined;
+    let providerKey = "manualRetry";
+
+    if (conversation.channel === "instagram") {
+      const recipient = this.getChannelRecipient(conversation, "instagram");
+      if (!recipient) {
+        result = {
+          rawPayload: { error: "missing_instagram_recipient" },
+          status: "failed"
+        };
+      } else {
+        result = await this.instagramCloud.sendText({
+          organizationId,
+          text: message.text,
+          to: recipient
+        });
+      }
+      providerKey = "instagramCloudRetry";
+    }
+
+    if (conversation.channel === "whatsapp") {
+      const recipient = this.getChannelRecipient(conversation, "whatsapp") ?? conversation.contact.phone ?? undefined;
+      if (!recipient) {
+        result = {
+          rawPayload: { error: "missing_whatsapp_recipient" },
+          status: "failed"
+        };
+      } else {
+        result = await this.whatsappCloud.sendText({
+          text: message.text,
+          to: recipient
+        });
+      }
+      providerKey = "whatsappCloudRetry";
+    }
+
+    if (!result) {
+      throw new BadRequestException("This channel does not support retries yet");
+    }
+
+    const updated = await this.prisma.message.update({
+      where: { id: message.id },
+      data: {
+        externalMessageId: result.externalMessageId ?? message.externalMessageId,
+        rawPayload: {
+          ...rawPayload,
+          [providerKey]: {
+            attemptedAt: new Date().toISOString(),
+            payload: result.rawPayload
+          }
+        } as Prisma.InputJsonValue,
+        status: result.status
+      },
+      include: this.messageInclude()
+    });
+
+    await this.auditLogs.create({
+      action: "message.retry",
+      actorUserId: user.sub,
+      entityId: message.id,
+      entityType: "message",
+      metadata: {
+        channel: conversation.channel,
+        conversationId,
+        status: result.status
+      },
+      organizationId
+    });
+
+    return updated;
+  }
+
   async updateStatus(
     organizationId: string,
     user: AuthenticatedUser,
@@ -232,5 +338,11 @@ export class MessagesService {
     channel: string
   ) {
     return conversation.contact.channels.find((item) => item.channel === channel)?.externalId;
+  }
+
+  private asPayloadRecord(payload: Prisma.JsonValue | null) {
+    return payload && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>)
+      : {};
   }
 }

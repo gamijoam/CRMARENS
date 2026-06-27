@@ -45,6 +45,8 @@ interface InstagramGraphConversationMessage {
 }
 
 interface InstagramSyncResult {
+  error?: string;
+  failed?: boolean;
   processed: number;
   skipped: number;
   syncedConversations: number;
@@ -187,7 +189,15 @@ export class WebhooksService implements OnModuleInit {
         lastSyncFinishedAt: new Date().toISOString(),
         lastSyncStatus: "failed"
       });
-      throw error;
+
+      return {
+        error: message,
+        failed: true,
+        processed: 0,
+        skipped: 0,
+        syncedConversations: 0,
+        throttled: false
+      };
     }
   }
 

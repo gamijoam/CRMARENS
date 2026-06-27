@@ -156,6 +156,60 @@ export class ChannelConnectionsService {
     return this.sanitizeConnection(connection);
   }
 
+  async testConnection(organizationId: string, actorUserId: string, id: string) {
+    const currentConnection = await this.findOne(organizationId, id, true);
+    const currentConfig = this.asConfigRecord(currentConnection.config);
+
+    if (currentConnection.channel !== "instagram") {
+      throw new ConflictException("Connection test is only available for Instagram right now");
+    }
+
+    const accessToken = typeof currentConfig.accessToken === "string" ? currentConfig.accessToken.trim() : "";
+    const checkedAt = new Date().toISOString();
+    const tokenHealth = accessToken
+      ? await this.validateInstagramAccessToken(accessToken)
+      : { error: "No access token configured", status: "invalid" };
+
+    const connection = await this.prisma.channelConnection.update({
+      where: { id },
+      data: {
+        config: {
+          ...currentConfig,
+          instagramHealth: {
+            ...this.asConfigRecord(currentConfig.instagramHealth),
+            lastConnectionTestAt: checkedAt,
+            tokenCheckedAt: checkedAt,
+            tokenError: tokenHealth.error,
+            tokenPageId: tokenHealth.pageId,
+            tokenPageName: tokenHealth.pageName,
+            tokenStatus: tokenHealth.status
+          }
+        } as Prisma.InputJsonValue
+      },
+      include: this.connectionInclude()
+    });
+
+    await this.auditLogs.create({
+      action: "channel_connection.tested",
+      actorUserId,
+      entityId: id,
+      entityType: "channel_connection",
+      metadata: {
+        channel: connection.channel,
+        status: tokenHealth.status
+      },
+      organizationId
+    });
+
+    return {
+      connection: this.sanitizeConnection(connection),
+      ok: tokenHealth.status === "valid",
+      pageName: tokenHealth.pageName,
+      status: tokenHealth.status,
+      error: tokenHealth.error
+    };
+  }
+
   private connectionInclude() {
     return {
       _count: {

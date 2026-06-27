@@ -201,6 +201,7 @@ interface ChannelConnection {
     accessTokenConfigured?: boolean;
     accessTokenPreview?: string;
     accessTokenUpdatedAt?: string;
+    instagramHealth?: Record<string, unknown>;
     [key: string]: unknown;
   };
   name: string;
@@ -212,10 +213,19 @@ interface ChannelConnection {
 }
 
 interface InstagramSyncResult {
+  error?: string;
+  failed?: boolean;
   processed: number;
   skipped: number;
   syncedConversations: number;
   throttled?: boolean;
+}
+
+interface ChannelConnectionTestResult {
+  error?: string;
+  ok: boolean;
+  pageName?: string;
+  status: string;
 }
 
 interface GlobalSearchResults {
@@ -851,7 +861,9 @@ export function CrmApp() {
       });
       await refreshData();
       setNotice(
-        `Token guardado. Sincronizacion: ${syncResult.syncedConversations} conversaciones, ${syncResult.processed} mensajes nuevos`
+        syncResult.failed
+          ? `Token guardado, pero Instagram no sincronizo: ${syncResult.error ?? "revisa el token"}`
+          : `Token guardado. Sincronizacion: ${syncResult.syncedConversations} conversaciones, ${syncResult.processed} mensajes nuevos`
       );
       formElement.reset();
     } catch (error) {
@@ -882,7 +894,9 @@ export function CrmApp() {
 
       if (!options.silent) {
         setNotice(
-          syncResult.throttled
+          syncResult.failed
+            ? `Instagram no sincronizo: ${syncResult.error ?? "revisa el token"}`
+            : syncResult.throttled
             ? "Sincronizacion omitida: Instagram se reviso hace unos segundos"
             : `Sincronizacion: ${syncResult.syncedConversations} conversaciones, ${syncResult.processed} mensajes nuevos`
         );
@@ -1034,6 +1048,49 @@ export function CrmApp() {
 
   async function updateChannelConnectionStatus(connectionId: string, status: "active" | "inactive") {
     await mutate(`/channel-connections/${connectionId}/status`, { status }, "PATCH");
+  }
+
+  async function testChannelConnection(connectionId: string) {
+    setNotice("");
+    try {
+      const result = await api<ChannelConnectionTestResult>(`/channel-connections/${connectionId}/test`, {
+        method: "POST",
+        token,
+        body: JSON.stringify({})
+      });
+      await refreshData();
+      setNotice(
+        result.ok
+          ? `Conexion verificada${result.pageName ? `: ${result.pageName}` : ""}`
+          : `No se pudo verificar Instagram: ${result.error ?? result.status}`
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo probar la conexion");
+    }
+  }
+
+  async function retryMessage(messageId: string) {
+    if (!selectedConversationId) {
+      return;
+    }
+
+    setNotice("");
+    try {
+      const updatedMessage = await api<Message>(
+        `/conversations/${selectedConversationId}/messages/${messageId}/retry`,
+        {
+          method: "POST",
+          token,
+          body: JSON.stringify({})
+        }
+      );
+      const nextMessages = await api<Message[]>(`/conversations/${selectedConversationId}/messages`, { token });
+      setMessages(nextMessages);
+      await refreshData(token, { silent: true });
+      setNotice(updatedMessage.status === "sent" ? "Mensaje reenviado" : "El reintento fallo, revisa el token/canal");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo reintentar el mensaje");
+    }
   }
 
   if (!token || !user) {
@@ -1216,6 +1273,7 @@ export function CrmApp() {
             connections={channelConnections}
             currentUser={user}
             onSubmit={submitChannelConnection}
+            onTestConnection={testChannelConnection}
             onUpdateConfig={submitChannelConnectionConfig}
             onUpdateStatus={updateChannelConnectionStatus}
           />
@@ -1243,6 +1301,7 @@ export function CrmApp() {
             onSubmitConversation={submitConversation}
             onSubmitInboundMessage={submitInboundMessage}
             onSubmitMessage={submitMessage}
+            onRetryMessage={retryMessage}
             onUnassign={unassignConversation}
           />
         ) : null}
@@ -2108,12 +2167,14 @@ function ChannelsView({
   connections,
   currentUser,
   onSubmit,
+  onTestConnection,
   onUpdateConfig,
   onUpdateStatus
 }: {
   connections: ChannelConnection[];
   currentUser: SessionUser;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onTestConnection: (connectionId: string) => void;
   onUpdateConfig: (connectionId: string, event: FormEvent<HTMLFormElement>) => void;
   onUpdateStatus: (connectionId: string, status: "active" | "inactive") => void;
 }) {
@@ -2165,16 +2226,12 @@ function ChannelsView({
               >
                 <div>
                   <strong>{connection.name}</strong>
-                  <span>
+                  <span className="muted-text">
                     {connection.config?.accessTokenConfigured
                       ? `Token guardado ${connection.config.accessTokenPreview ?? ""}`
                       : "Sin token guardado"}
                   </span>
-                  {typeof connection.config?.instagramHealth === "object" && connection.config.instagramHealth ? (
-                    <span>
-                      {formatInstagramHealth(connection.config.instagramHealth as Record<string, unknown>)}
-                    </span>
-                  ) : null}
+                  <InstagramHealthPanel health={connection.config?.instagramHealth} />
                 </div>
                 <input
                   name="externalAccountId"
@@ -2189,6 +2246,13 @@ function ChannelsView({
                 />
                 <button className="primary-button" type="submit">
                   <CheckCircle2 size={17} /> Guardar token
+                </button>
+                <button
+                  className="secondary-button"
+                  onClick={() => void onTestConnection(connection.id)}
+                  type="button"
+                >
+                  <CircleDot size={17} /> Probar conexion
                 </button>
               </form>
             ))}
@@ -2496,6 +2560,26 @@ function SlaPill({ sla }: { sla: { elapsedHours: number; label: string; state: S
   return <span className={`sla-pill ${sla.state}`}>{sla.label}</span>;
 }
 
+function InstagramHealthPanel({ health }: { health?: Record<string, unknown> }) {
+  const summary = formatInstagramHealth(health ?? {});
+  const state =
+    summary.tokenStatus === "valid" && summary.syncStatus !== "failed"
+      ? "ok"
+      : summary.tokenStatus === "invalid" || summary.syncStatus === "failed"
+        ? "failed"
+        : "warning";
+
+  return (
+    <div className={`instagram-health ${state}`}>
+      <div>
+        <strong>{summary.title}</strong>
+        <span>{summary.detail}</span>
+      </div>
+      {summary.error ? <small>{summary.error}</small> : null}
+    </div>
+  );
+}
+
 function AssigneeSelect({
   assignedUserId,
   members,
@@ -2540,6 +2624,7 @@ function InboxView({
   onSubmitConversation,
   onSubmitInboundMessage,
   onSubmitMessage,
+  onRetryMessage,
   onUnassign
 }: {
   channelConnections: ChannelConnection[];
@@ -2562,6 +2647,7 @@ function InboxView({
   onSubmitConversation: (event: FormEvent<HTMLFormElement>) => void;
   onSubmitInboundMessage: (event: FormEvent<HTMLFormElement>) => void;
   onSubmitMessage: (event: FormEvent<HTMLFormElement>) => void;
+  onRetryMessage: (messageId: string) => void;
   onUnassign: (conversationId: string) => void;
 }) {
   const messageListRef = useRef<HTMLDivElement | null>(null);
@@ -2707,7 +2793,18 @@ function InboxView({
                 <time>{formatDate(message.createdAt)}</time>
               </header>
               <p>{message.text}</p>
-              <span>{message.status}</span>
+              <footer className="message-footer">
+                <span>{message.status}</span>
+                {message.direction === "outbound" && message.status === "failed" ? (
+                  <button
+                    className="retry-button"
+                    onClick={() => void onRetryMessage(message.id)}
+                    type="button"
+                  >
+                    Reintentar
+                  </button>
+                ) : null}
+              </footer>
             </article>
           ))}
           {!messages.length ? <p className="muted-text">Sin mensajes todavia.</p> : null}
@@ -2856,6 +2953,9 @@ function formatInstagramHealth(health: Record<string, unknown>) {
   const syncStatus = typeof health.lastSyncStatus === "string" ? health.lastSyncStatus : undefined;
   const lastSyncFinishedAt = typeof health.lastSyncFinishedAt === "string" ? health.lastSyncFinishedAt : undefined;
   const lastError = typeof health.lastError === "string" ? health.lastError : undefined;
+  const tokenError = typeof health.tokenError === "string" ? health.tokenError : undefined;
+  const lastSyncProcessed = typeof health.lastSyncProcessed === "number" ? health.lastSyncProcessed : undefined;
+  const syncedConversations = typeof health.syncedConversations === "number" ? health.syncedConversations : undefined;
   const tokenLabel =
     tokenStatus === "valid"
       ? "token valido"
@@ -2869,8 +2969,18 @@ function formatInstagramHealth(health: Record<string, unknown>) {
     : syncStatus
       ? `sync ${syncStatus}`
       : "sin sync reciente";
+  const countLabel =
+    lastSyncProcessed !== undefined || syncedConversations !== undefined
+      ? ` / ${lastSyncProcessed ?? 0} nuevos / ${syncedConversations ?? 0} hilos`
+      : "";
 
-  return lastError ? `${tokenLabel} / ${syncLabel} / ${lastError}` : `${tokenLabel} / ${syncLabel}`;
+  return {
+    detail: `${syncLabel}${countLabel}`,
+    error: lastError ?? tokenError,
+    syncStatus,
+    title: tokenLabel,
+    tokenStatus
+  };
 }
 
 function contactDisplayName(contact: Contact, channel?: string) {

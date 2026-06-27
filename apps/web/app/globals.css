@@ -1204,7 +1204,7 @@ textarea:focus {
   border-radius: 8px;
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(180px, 0.8fr) minmax(180px, 1fr) minmax(240px, 1.2fr) auto;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.8fr) minmax(240px, 1fr) auto auto;
   padding: 12px;
 }
 
@@ -1217,6 +1217,49 @@ textarea:focus {
   color: var(--muted);
   font-size: 13px;
   margin-top: 4px;
+}
+
+.instagram-health {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  max-width: 520px;
+  padding: 10px;
+}
+
+.instagram-health.ok {
+  background: #eefbf1;
+  border-color: #b8e5c1;
+}
+
+.instagram-health.warning {
+  background: #fff8e8;
+  border-color: #f1d49d;
+}
+
+.instagram-health.failed {
+  background: #fff1ef;
+  border-color: #f2b8b0;
+}
+
+.instagram-health div {
+  display: grid;
+  gap: 2px;
+}
+
+.instagram-health strong {
+  font-size: 13px;
+}
+
+.instagram-health small {
+  color: #9c2517;
+  display: block;
+  font-size: 12px;
+  line-height: 1.35;
+  max-height: 52px;
+  overflow: auto;
 }
 
 .pipeline-row {
@@ -1342,7 +1385,7 @@ textarea:focus {
   color: #ffffff;
 }
 
-.message-bubble.outbound span,
+.message-bubble.outbound .message-footer span,
 .message-bubble.outbound time {
   color: rgba(255, 255, 255, 0.76);
 }
@@ -1351,6 +1394,29 @@ textarea:focus {
   align-self: flex-start;
   background: #ffffff;
   border-color: #d8d2e7;
+}
+
+.message-footer {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.retry-button {
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  border-radius: 999px;
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  min-height: 28px;
+  padding: 0 10px;
+}
+
+.retry-button:hover {
+  background: rgba(255, 255, 255, 0.26);
 }
 
 .message-form {

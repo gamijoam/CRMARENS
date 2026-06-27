@@ -49,4 +49,10 @@ export class ChannelConnectionsController {
     requireRole(user, ["owner", "admin"]);
     return this.channelConnectionsService.updateConfig(requireOrganization(user), user.sub, id, dto);
   }
+
+  @Post(":id/test")
+  testConnection(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
+    requireRole(user, ["owner", "admin"]);
+    return this.channelConnectionsService.testConnection(requireOrganization(user), user.sub, id);
+  }
 }

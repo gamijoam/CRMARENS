@@ -41,4 +41,13 @@ export class MessagesController {
       dto
     );
   }
+
+  @Post(":messageId/retry")
+  retry(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("conversationId") conversationId: string,
+    @Param("messageId") messageId: string
+  ) {
+    return this.messagesService.retry(requireOrganization(user), user, conversationId, messageId);
+  }
 }
