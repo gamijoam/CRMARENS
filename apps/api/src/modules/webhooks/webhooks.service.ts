@@ -44,9 +44,19 @@ interface InstagramGraphConversationMessage {
   text: string;
 }
 
+interface InstagramSyncResult {
+  processed: number;
+  skipped: number;
+  syncedConversations: number;
+  throttled?: boolean;
+}
+
 @Injectable()
 export class WebhooksService implements OnModuleInit {
   private readonly logger = new Logger(WebhooksService.name);
+  private readonly instagramSyncCooldownMs = 15_000;
+  private readonly instagramSyncLocks = new Map<string, Promise<InstagramSyncResult>>();
+  private readonly instagramSyncLastStartedAt = new Map<string, number>();
 
   constructor(
     private readonly auditLogs: AuditLogsService,
@@ -79,10 +89,43 @@ export class WebhooksService implements OnModuleInit {
       };
     }
 
-    return this.syncInstagramForOrganization(organizationId);
+    return this.syncInstagramForOrganization(organizationId, { reason: "startup" });
   }
 
-  async syncInstagramForOrganization(organizationId: string) {
+  async syncInstagramForOrganization(organizationId: string, options: { force?: boolean; reason?: string } = {}) {
+    const runningSync = this.instagramSyncLocks.get(organizationId);
+    if (runningSync) {
+      this.logger.log(`Instagram sync joined active run organization=${organizationId}`);
+      return runningSync;
+    }
+
+    const now = Date.now();
+    const lastStartedAt = this.instagramSyncLastStartedAt.get(organizationId) ?? 0;
+    if (!options.force && now - lastStartedAt < this.instagramSyncCooldownMs) {
+      this.logger.log(`Instagram sync throttled organization=${organizationId}`);
+      return {
+        processed: 0,
+        skipped: 0,
+        syncedConversations: 0,
+        throttled: true
+      };
+    }
+
+    const syncPromise = this.runInstagramSyncForOrganization(organizationId, options)
+      .finally(() => {
+        this.instagramSyncLocks.delete(organizationId);
+      });
+
+    this.instagramSyncLastStartedAt.set(organizationId, now);
+    this.instagramSyncLocks.set(organizationId, syncPromise);
+
+    return syncPromise;
+  }
+
+  private async runInstagramSyncForOrganization(
+    organizationId: string,
+    options: { force?: boolean; reason?: string } = {}
+  ): Promise<InstagramSyncResult> {
     const connection = await this.prisma.channelConnection.findFirst({
       where: {
         organizationId,
@@ -90,28 +133,62 @@ export class WebhooksService implements OnModuleInit {
         status: "active"
       },
       orderBy: { createdAt: "asc" },
-      select: { id: true }
+      select: { config: true, id: true }
     });
     const accessToken = await this.getInstagramAccessToken(organizationId);
 
     if (!accessToken) {
       this.logger.warn("Instagram startup sync skipped: access token is not configured");
+      await this.updateInstagramConnectionHealth(connection?.id, {
+        lastError: "access_token_missing",
+        lastSyncStatus: "skipped"
+      });
       return {
         processed: 0,
         skipped: 0,
-        syncedConversations: 0
+        syncedConversations: 0,
+        throttled: false
       };
     }
 
-    const result = await this.syncRecentInstagramConversationHistories(organizationId, connection?.id, {
-      object: "instagram"
+    await this.updateInstagramConnectionHealth(connection?.id, {
+      lastError: null,
+      lastSyncStartedAt: new Date().toISOString(),
+      lastSyncStatus: "running",
+      syncReason: options.reason ?? "manual"
     });
 
-    this.logger.log(
-      `Instagram sync processed=${result.processed} skipped=${result.skipped} syncedConversations=${result.syncedConversations}`
-    );
+    try {
+      const result = await this.syncRecentInstagramConversationHistories(organizationId, connection?.id, {
+        object: "instagram"
+      });
 
-    return result;
+      await this.updateInstagramConnectionHealth(connection?.id, {
+        lastError: null,
+        lastSyncFinishedAt: new Date().toISOString(),
+        lastSyncProcessed: result.processed,
+        lastSyncSkipped: result.skipped,
+        lastSyncStatus: "ok",
+        syncedConversations: result.syncedConversations
+      });
+
+      this.logger.log(
+        `Instagram sync processed=${result.processed} skipped=${result.skipped} syncedConversations=${result.syncedConversations}`
+      );
+
+      return {
+        ...result,
+        throttled: false
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown Instagram sync error";
+      await this.updateInstagramConnectionHealth(connection?.id, {
+        lastError: message,
+        lastSyncFinishedAt: new Date().toISOString(),
+        lastSyncStatus: "failed"
+      });
+      throw error;
+    }
   }
 
   async receiveMetaWhatsapp(dto: MetaWhatsAppWebhookDto) {
@@ -247,7 +324,12 @@ export class WebhooksService implements OnModuleInit {
         continue;
       }
 
-      await this.persistIncomingInstagramMessage(organizationId, connection?.id, message, dto);
+      const savedMessage = await this.persistIncomingInstagramMessage(organizationId, connection?.id, message, dto);
+      if (!savedMessage) {
+        skipped += 1;
+        continue;
+      }
+
       this.logger.log(`Instagram inbound message saved id=${message.externalMessageId} sender=${message.from}`);
       await this.maybeSendInstagramAutoReply(message.from, organizationId);
       processed += 1;
@@ -330,7 +412,7 @@ export class WebhooksService implements OnModuleInit {
       const direction = ownIds.has(graphMessage.fromId) ? "outbound" : "inbound";
       const contactExternalId = direction === "inbound" ? graphMessage.fromId : participant.fromId;
 
-      await this.persistInstagramGraphMessage(
+      const savedMessage = await this.persistInstagramGraphMessage(
         organizationId,
         channelConnectionId,
         {
@@ -348,7 +430,11 @@ export class WebhooksService implements OnModuleInit {
           graphMessage
         } as unknown as Prisma.InputJsonValue
       );
-      processed += 1;
+      if (savedMessage) {
+        processed += 1;
+      } else {
+        skipped += 1;
+      }
     }
 
     this.logger.log(
@@ -492,8 +578,9 @@ export class WebhooksService implements OnModuleInit {
     const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
     if (!response.ok) {
-      this.logger.warn(`Instagram Graph conversations fetch failed: ${JSON.stringify(payload)}`);
-      return [];
+      const message = this.formatGraphError(payload, "Instagram Graph conversations fetch failed");
+      this.logger.warn(message);
+      throw new Error(message);
     }
 
     const data = Array.isArray(payload.data) ? payload.data : [];
@@ -520,8 +607,9 @@ export class WebhooksService implements OnModuleInit {
     const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
     if (!response.ok) {
-      this.logger.warn(`Instagram Graph conversation history fetch failed: ${JSON.stringify(payload)}`);
-      return [];
+      const message = this.formatGraphError(payload, "Instagram Graph conversation history fetch failed");
+      this.logger.warn(message);
+      throw new Error(message);
     }
 
     const messages = this.asRecord(payload.messages);
@@ -700,6 +788,35 @@ export class WebhooksService implements OnModuleInit {
     return this.readConfigString(connection?.config, "accessToken") ?? this.config.get<string>("META_INSTAGRAM_ACCESS_TOKEN");
   }
 
+  private async updateInstagramConnectionHealth(
+    connectionId: string | undefined,
+    patch: Record<string, unknown>
+  ) {
+    if (!connectionId) {
+      return;
+    }
+
+    const connection = await this.prisma.channelConnection.findUnique({
+      where: { id: connectionId },
+      select: { config: true }
+    });
+    const config = this.asMutableConfigRecord(connection?.config);
+
+    await this.prisma.channelConnection.update({
+      where: { id: connectionId },
+      data: {
+        config: {
+          ...config,
+          instagramHealth: {
+            ...this.asMutableConfigRecord(config.instagramHealth),
+            ...patch,
+            updatedAt: new Date().toISOString()
+          }
+        } as Prisma.InputJsonValue
+      }
+    });
+  }
+
   private getActiveInstagramConnectionConfig(organizationId: string) {
     return this.prisma.channelConnection.findFirst({
       where: {
@@ -722,6 +839,24 @@ export class WebhooksService implements OnModuleInit {
 
     const value = (config as Record<string, unknown>)[key];
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  }
+
+  private formatGraphError(payload: Record<string, unknown>, fallback: string) {
+    const error = this.asRecord(payload.error);
+    const message = typeof error?.message === "string" ? error.message : fallback;
+    const code = typeof error?.code === "number" || typeof error?.code === "string" ? error.code : "unknown";
+    const subcode =
+      typeof error?.error_subcode === "number" || typeof error?.error_subcode === "string"
+        ? error.error_subcode
+        : "unknown";
+
+    return `${fallback}: code=${code} subcode=${subcode} message=${message}`;
+  }
+
+  private asMutableConfigRecord(config: unknown) {
+    return config && typeof config === "object" && !Array.isArray(config)
+      ? (config as Record<string, unknown>)
+      : {};
   }
 
   private async getInstagramOwnAccountIds(organizationId: string) {
@@ -1093,31 +1228,26 @@ export class WebhooksService implements OnModuleInit {
       createdAt
     );
 
-    const savedMessage = await this.prisma.$transaction(async (tx) => {
-      const nextMessage = await tx.message.create({
-        data: {
-          channel: "instagram",
-          conversationId: conversation.id,
-          createdAt,
-          direction: "inbound",
-          externalMessageId: message.externalMessageId,
-          rawPayload: rawPayload as Prisma.InputJsonValue,
-          status: "delivered",
-          text: message.text,
-          type: "text"
-        }
-      });
+    const savedMessage = await this.createInstagramMessageIdempotently(
+      conversation.id,
+      {
+        channel: "instagram",
+        conversationId: conversation.id,
+        createdAt,
+        direction: "inbound",
+        externalMessageId: message.externalMessageId,
+        rawPayload: rawPayload as Prisma.InputJsonValue,
+        status: "delivered",
+        text: message.text,
+        type: "text"
+      },
+      createdAt
+    );
 
-      await tx.conversation.update({
-        where: { id: conversation.id },
-        data: {
-          lastMessageAt: createdAt,
-          status: "open"
-        }
-      });
-
-      return nextMessage;
-    });
+    if (!savedMessage) {
+      this.logger.log(`Instagram webhook skipped duplicate id=${message.externalMessageId}`);
+      return undefined;
+    }
 
     await this.auditLogs.create({
       action: "message.inbound",
@@ -1154,31 +1284,26 @@ export class WebhooksService implements OnModuleInit {
       createdAt
     );
 
-    const savedMessage = await this.prisma.$transaction(async (tx) => {
-      const nextMessage = await tx.message.create({
-        data: {
-          channel: "instagram",
-          conversationId: conversation.id,
-          createdAt,
-          direction,
-          externalMessageId: message.externalMessageId,
-          rawPayload,
-          status: direction === "inbound" ? "delivered" : "sent",
-          text: message.text,
-          type: "text"
-        }
-      });
+    const savedMessage = await this.createInstagramMessageIdempotently(
+      conversation.id,
+      {
+        channel: "instagram",
+        conversationId: conversation.id,
+        createdAt,
+        direction,
+        externalMessageId: message.externalMessageId,
+        rawPayload,
+        status: direction === "inbound" ? "delivered" : "sent",
+        text: message.text,
+        type: "text"
+      },
+      createdAt
+    );
 
-      await tx.conversation.update({
-        where: { id: conversation.id },
-        data: {
-          lastMessageAt: createdAt,
-          status: "open"
-        }
-      });
-
-      return nextMessage;
-    });
+    if (!savedMessage) {
+      this.logger.log(`Instagram Graph history skipped duplicate id=${message.externalMessageId}`);
+      return undefined;
+    }
 
     await this.auditLogs.create({
       action: direction === "inbound" ? "message.inbound" : "message.outbound_synced",
@@ -1197,6 +1322,38 @@ export class WebhooksService implements OnModuleInit {
     });
 
     return savedMessage;
+  }
+
+  private async createInstagramMessageIdempotently(
+    conversationId: string,
+    data: Prisma.MessageUncheckedCreateInput,
+    createdAt: Date
+  ) {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const nextMessage = await tx.message.create({ data });
+
+        await tx.conversation.update({
+          where: { id: conversationId },
+          data: {
+            lastMessageAt: createdAt,
+            status: "open"
+          }
+        });
+
+        return nextMessage;
+      });
+    } catch (error) {
+      if (this.isPrismaUniqueConstraintError(error)) {
+        return undefined;
+      }
+
+      throw error;
+    }
+  }
+
+  private isPrismaUniqueConstraintError(error: unknown) {
+    return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
   }
 
   private parseInstagramTimestamp(timestamp: number | string | undefined) {

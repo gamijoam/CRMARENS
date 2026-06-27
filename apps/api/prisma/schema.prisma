@@ -273,6 +273,7 @@ model Message {
   sentBy       User?        @relation("SentMessages", fields: [sentByUserId], references: [id])
 
   @@index([conversationId, createdAt])
+  @@unique([channel, externalMessageId])
   @@map("messages")
 }
 

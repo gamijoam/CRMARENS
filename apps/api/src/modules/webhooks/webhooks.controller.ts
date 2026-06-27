@@ -80,9 +80,12 @@ export class WebhooksController {
 
   @UseGuards(JwtAuthGuard)
   @Post("meta/instagram/sync")
-  syncMetaInstagram(@CurrentUser() user: AuthenticatedUser) {
+  syncMetaInstagram(@CurrentUser() user: AuthenticatedUser, @Body() body?: { force?: boolean }) {
     requireRole(user, ["owner", "admin"]);
-    return this.webhooksService.syncInstagramForOrganization(requireOrganization(user));
+    return this.webhooksService.syncInstagramForOrganization(requireOrganization(user), {
+      force: body?.force === true,
+      reason: body?.force === true ? "manual_force" : "manual"
+    });
   }
 
   private summarizeInstagramWebhook(body: Record<string, unknown>) {

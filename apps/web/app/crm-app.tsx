@@ -215,6 +215,7 @@ interface InstagramSyncResult {
   processed: number;
   skipped: number;
   syncedConversations: number;
+  throttled?: boolean;
 }
 
 interface GlobalSearchResults {
@@ -846,7 +847,7 @@ export function CrmApp() {
       const syncResult = await api<InstagramSyncResult>("/webhooks/meta/instagram/sync", {
         method: "POST",
         token,
-        body: JSON.stringify({})
+        body: JSON.stringify({ force: true })
       });
       await refreshData();
       setNotice(
@@ -858,7 +859,7 @@ export function CrmApp() {
     }
   }
 
-  async function syncInstagramMessages(options: { silent?: boolean } = {}) {
+  async function syncInstagramMessages(options: { force?: boolean; silent?: boolean } = {}) {
     if (!token) {
       return undefined;
     }
@@ -871,7 +872,7 @@ export function CrmApp() {
       const syncResult = await api<InstagramSyncResult>("/webhooks/meta/instagram/sync", {
         method: "POST",
         token,
-        body: JSON.stringify({})
+        body: JSON.stringify({ force: options.force === true })
       });
       await refreshData(token, { silent: options.silent });
       if (selectedConversationId) {
@@ -881,7 +882,9 @@ export function CrmApp() {
 
       if (!options.silent) {
         setNotice(
-          `Sincronizacion: ${syncResult.syncedConversations} conversaciones, ${syncResult.processed} mensajes nuevos`
+          syncResult.throttled
+            ? "Sincronizacion omitida: Instagram se reviso hace unos segundos"
+            : `Sincronizacion: ${syncResult.syncedConversations} conversaciones, ${syncResult.processed} mensajes nuevos`
         );
       }
 
@@ -896,7 +899,7 @@ export function CrmApp() {
 
   async function refreshWorkspace() {
     if (view === "inbox" && ["owner", "admin"].includes(user?.role ?? "")) {
-      const syncResult = await syncInstagramMessages();
+      const syncResult = await syncInstagramMessages({ force: true });
       if (syncResult) {
         return;
       }
@@ -2167,6 +2170,11 @@ function ChannelsView({
                       ? `Token guardado ${connection.config.accessTokenPreview ?? ""}`
                       : "Sin token guardado"}
                   </span>
+                  {typeof connection.config?.instagramHealth === "object" && connection.config.instagramHealth ? (
+                    <span>
+                      {formatInstagramHealth(connection.config.instagramHealth as Record<string, unknown>)}
+                    </span>
+                  ) : null}
                 </div>
                 <input
                   name="externalAccountId"
@@ -2841,6 +2849,28 @@ function channelLabel(channel: string) {
     whatsapp: "WhatsApp"
   };
   return labels[channel] ?? channel;
+}
+
+function formatInstagramHealth(health: Record<string, unknown>) {
+  const tokenStatus = typeof health.tokenStatus === "string" ? health.tokenStatus : undefined;
+  const syncStatus = typeof health.lastSyncStatus === "string" ? health.lastSyncStatus : undefined;
+  const lastSyncFinishedAt = typeof health.lastSyncFinishedAt === "string" ? health.lastSyncFinishedAt : undefined;
+  const lastError = typeof health.lastError === "string" ? health.lastError : undefined;
+  const tokenLabel =
+    tokenStatus === "valid"
+      ? "token valido"
+      : tokenStatus === "invalid"
+        ? "token invalido"
+        : tokenStatus === "unknown"
+          ? "token sin validar"
+          : "token pendiente";
+  const syncLabel = lastSyncFinishedAt
+    ? `sync ${syncStatus ?? "ok"} ${formatDate(lastSyncFinishedAt)}`
+    : syncStatus
+      ? `sync ${syncStatus}`
+      : "sin sync reciente";
+
+  return lastError ? `${tokenLabel} / ${syncLabel} / ${lastError}` : `${tokenLabel} / ${syncLabel}`;
 }
 
 function contactDisplayName(contact: Contact, channel?: string) {

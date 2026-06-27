@@ -1,4 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditLogsService } from "../audit-logs/audit-logs.service";
@@ -10,7 +11,8 @@ import { UpdateChannelConnectionStatusDto } from "./dto/update-channel-connectio
 export class ChannelConnectionsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly auditLogs: AuditLogsService
+    private readonly auditLogs: AuditLogsService,
+    private readonly config: ConfigService
   ) {}
 
   async create(organizationId: string, actorUserId: string, dto: CreateChannelConnectionDto) {
@@ -107,9 +109,26 @@ export class ChannelConnectionsService {
   ) {
     const currentConnection = await this.findOne(organizationId, id, true);
     const currentConfig = this.asConfigRecord(currentConnection.config);
+    const trimmedAccessToken = dto.accessToken?.trim();
+    const tokenHealth = trimmedAccessToken
+      ? await this.validateInstagramAccessToken(trimmedAccessToken)
+      : undefined;
     const nextConfig = {
       ...currentConfig,
-      ...(dto.accessToken ? { accessToken: dto.accessToken.trim(), accessTokenUpdatedAt: new Date().toISOString() } : {})
+      ...(trimmedAccessToken
+        ? {
+            accessToken: trimmedAccessToken,
+            accessTokenUpdatedAt: new Date().toISOString(),
+            instagramHealth: {
+              ...this.asConfigRecord(currentConfig.instagramHealth),
+              tokenCheckedAt: new Date().toISOString(),
+              tokenError: tokenHealth?.error,
+              tokenPageId: tokenHealth?.pageId,
+              tokenPageName: tokenHealth?.pageName,
+              tokenStatus: tokenHealth?.status
+            }
+          }
+        : {})
     };
 
     const connection = await this.prisma.channelConnection.update({
@@ -162,7 +181,7 @@ export class ChannelConnectionsService {
     };
   }
 
-  private asConfigRecord(config: Prisma.JsonValue | null) {
+  private asConfigRecord(config: unknown) {
     return config && typeof config === "object" && !Array.isArray(config)
       ? (config as Record<string, unknown>)
       : {};
@@ -174,5 +193,37 @@ export class ChannelConnectionsService {
     }
 
     return `${value.slice(0, 4)}...${value.slice(-4)}`;
+  }
+
+  private async validateInstagramAccessToken(accessToken: string) {
+    const graphVersion = this.config.get<string>("META_INSTAGRAM_API_VERSION") ?? "v25.0";
+    const url = new URL(`https://graph.facebook.com/${graphVersion}/me`);
+    url.searchParams.set("fields", "id,name,instagram_business_account");
+
+    try {
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+      if (!response.ok) {
+        const error = this.asConfigRecord(payload.error);
+        return {
+          error: typeof error.message === "string" ? error.message : "Meta rejected token",
+          status: "invalid"
+        };
+      }
+
+      return {
+        pageId: typeof payload.id === "string" ? payload.id : undefined,
+        pageName: typeof payload.name === "string" ? payload.name : undefined,
+        status: "valid"
+      };
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : "Could not validate token",
+        status: "unknown"
+      };
+    }
   }
 }
