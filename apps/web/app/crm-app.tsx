@@ -211,6 +211,12 @@ interface ChannelConnection {
   };
 }
 
+interface InstagramSyncResult {
+  processed: number;
+  skipped: number;
+  syncedConversations: number;
+}
+
 interface GlobalSearchResults {
   contacts: Contact[];
   leads: Lead[];
@@ -425,7 +431,9 @@ export function CrmApp() {
       return;
     }
 
-    void api<Message[]>(`/conversations/${selectedConversationId}/messages`, { token }).then(setMessages);
+    void api<Message[]>(`/conversations/${selectedConversationId}/messages`, { token })
+      .then(setMessages)
+      .catch(() => undefined);
   }, [selectedConversationId, token]);
 
   useEffect(() => {
@@ -476,7 +484,9 @@ export function CrmApp() {
     const interval = window.setInterval(() => {
       void refreshData(token, { silent: true });
       if (selectedConversationId) {
-        void api<Message[]>(`/conversations/${selectedConversationId}/messages`, { token }).then(setMessages);
+        void api<Message[]>(`/conversations/${selectedConversationId}/messages`, { token })
+          .then(setMessages)
+          .catch(() => undefined);
       }
     }, 8000);
 
@@ -810,11 +820,30 @@ export function CrmApp() {
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     const accessToken = String(form.get("accessToken") ?? "").trim();
-    await mutate(`/channel-connections/${connectionId}/config`, {
-      ...(accessToken ? { accessToken } : {}),
-      externalAccountId: form.get("externalAccountId")
-    }, "PATCH");
-    formElement.reset();
+    setNotice("");
+
+    try {
+      await api(`/channel-connections/${connectionId}/config`, {
+        method: "PATCH",
+        token,
+        body: JSON.stringify({
+          ...(accessToken ? { accessToken } : {}),
+          externalAccountId: form.get("externalAccountId")
+        })
+      });
+      const syncResult = await api<InstagramSyncResult>("/webhooks/meta/instagram/sync", {
+        method: "POST",
+        token,
+        body: JSON.stringify({})
+      });
+      await refreshData();
+      setNotice(
+        `Token guardado. Sincronizacion: ${syncResult.syncedConversations} conversaciones, ${syncResult.processed} mensajes nuevos`
+      );
+      formElement.reset();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo sincronizar Instagram");
+    }
   }
 
   async function submitMessage(event: FormEvent<HTMLFormElement>) {
@@ -2003,7 +2032,7 @@ function NotesView({
           {(note) => (
             <Row
               key={note.id}
-              meta={note.lead?.contact.fullName ?? note.contact?.fullName ?? new Date(note.createdAt).toLocaleString()}
+              meta={note.lead?.contact?.fullName ?? note.contact?.fullName ?? new Date(note.createdAt).toLocaleString()}
               title={note.body}
             />
           )}

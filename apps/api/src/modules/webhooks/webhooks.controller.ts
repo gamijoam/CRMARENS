@@ -1,6 +1,11 @@
-import { Body, Controller, Get, HttpCode, Logger, Post, Query, Res, UnauthorizedException } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Logger, Post, Query, Res, UnauthorizedException, UseGuards } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Response } from "express";
+import { AuthenticatedUser } from "../../shared/authenticated-user";
+import { CurrentUser } from "../../shared/current-user.decorator";
+import { JwtAuthGuard } from "../../shared/jwt-auth.guard";
+import { requireOrganization } from "../../shared/require-organization";
+import { requireRole } from "../../shared/require-role";
 import { MetaInstagramWebhookDto } from "./dto/meta-instagram-webhook.dto";
 import { MetaWhatsAppWebhookDto } from "./dto/meta-whatsapp-webhook.dto";
 import { WebhooksService } from "./webhooks.service";
@@ -71,6 +76,13 @@ export class WebhooksController {
           }`
         );
       });
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post("meta/instagram/sync")
+  syncMetaInstagram(@CurrentUser() user: AuthenticatedUser) {
+    requireRole(user, ["owner", "admin"]);
+    return this.webhooksService.syncInstagramForOrganization(requireOrganization(user));
   }
 
   private summarizeInstagramWebhook(body: Record<string, unknown>) {

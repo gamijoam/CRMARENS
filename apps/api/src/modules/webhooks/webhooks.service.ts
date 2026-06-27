@@ -79,6 +79,10 @@ export class WebhooksService implements OnModuleInit {
       };
     }
 
+    return this.syncInstagramForOrganization(organizationId);
+  }
+
+  async syncInstagramForOrganization(organizationId: string) {
     const connection = await this.prisma.channelConnection.findFirst({
       where: {
         organizationId,
@@ -104,7 +108,7 @@ export class WebhooksService implements OnModuleInit {
     });
 
     this.logger.log(
-      `Instagram startup sync processed=${result.processed} skipped=${result.skipped} syncedConversations=${result.syncedConversations}`
+      `Instagram sync processed=${result.processed} skipped=${result.skipped} syncedConversations=${result.syncedConversations}`
     );
 
     return result;
